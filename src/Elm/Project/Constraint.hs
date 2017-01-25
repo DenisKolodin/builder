@@ -1,15 +1,16 @@
-module Elm.Package.Constraint
-    ( Constraint
-    , fromString
-    , toString
-    , untilNextMajor
-    , untilNextMinor
-    , expand
-    , defaultElmVersion
-    , isSatisfied
-    , check
-    , errorMessage
-    ) where
+module Elm.Project.Constraint
+  ( Constraint
+  , fromString
+  , toString
+  , untilNextMajor
+  , untilNextMinor
+  , expand
+  , defaultElmVersion
+  , isSatisfied
+  , check
+  , errorMessage
+  )
+  where
 
 import qualified Data.Aeson as Json
 import qualified Data.Text as Text

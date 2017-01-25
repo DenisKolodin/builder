@@ -1,0 +1,516 @@
+{-# OPTIONS_GHC -Wall #-}
+{-# LANGUAGE OverloadedStrings #-}
+module Elm.Project
+  ( Project(..)
+  , AppInfo(..)
+  , PkgInfo(..), Repo(..)
+  , Bundles(..)
+  , parse
+  , forcePkg
+  , path, read, unsafeRead, write
+  )
+  where
+
+import Prelude hiding (read)
+import Control.Monad.Trans (liftIO)
+import qualified Data.Aeson as Json
+import qualified Data.ByteString.Lazy.Char8 as BS
+import qualified Data.HashMap.Strict as HashMap
+import qualified Data.Map as Map
+import qualified Data.Text as Text
+import Data.Text (Text)
+import qualified Data.Vector as Vector
+import qualified System.Directory as Dir
+import qualified System.Exit as Exit
+import System.FilePath ((</>))
+
+import qualified Elm.Compiler as Compiler
+import qualified Elm.Compiler.Module as Module
+import qualified Elm.Package as Pkg
+
+import qualified CommandLine.Helpers as CL
+import qualified Elm.Assets as Assets
+import qualified Elm.Project.Constraint as C
+import qualified Elm.Project.Licenses as Licenses
+import qualified Reporting.Error as GeneralError
+import qualified Reporting.Error.Project as Error
+import Reporting.Error.Project (Error)
+import qualified Reporting.Task as Task
+
+
+
+-- PROJECT
+
+
+data Project
+  = App AppInfo
+  | Pkg PkgInfo
+
+
+data AppInfo =
+  AppInfo
+    { _app_elm_version :: Pkg.Version
+    , _app_dependencies :: ExactDeps
+    , _app_test_deps :: ExactDeps
+    , _app_exact_deps :: ExactDeps
+    , _app_source_dir :: FilePath
+    , _app_cache_dir :: FilePath
+    , _app_output_dir :: FilePath
+    , _app_bundles :: Bundles
+    }
+
+
+type ExactDeps =
+  Map.Map Pkg.Name Pkg.Version
+
+
+data Bundles = Bundles
+
+
+data PkgInfo =
+  PkgInfo
+    { _pkg_repo :: Repo
+    , _pkg_summary :: Text
+    , _pkg_license :: Licenses.License
+    , _pkg_version :: Pkg.Version
+    , _pkg_source_dir :: FilePath
+    , _pkg_cache_dir :: FilePath
+    , _pkg_exposed :: [Module.Raw]
+    , _pkg_dependencies :: Constraints
+    , _pkg_test_deps :: Constraints
+    , _pkg_exact_deps :: ExactDeps
+    , _pkg_elm_version :: C.Constraint
+    , _pkg_natives :: Bool
+    , _pkg_effects :: Bool
+    }
+
+
+type Constraints =
+  Map.Map Pkg.Name C.Constraint
+
+
+data Repo
+  = GitHub Text Text
+  | GitLab Text Text
+  | BitBucket Text Text
+
+
+
+-- JSON to PROJECT
+
+
+parse :: BS.ByteString -> Either Error Project
+parse bytestring =
+  do  object <- onError Error.BadJson (Json.eitherDecode bytestring)
+      case HashMap.lookup "type" object of
+        Just "application" ->
+          App <$> parseAppInfo object
+
+        Just "package" ->
+          Pkg <$> parsePkgInfo object
+
+        _ ->
+          Left $ Error.BadType
+
+
+parseAppInfo :: Json.Object -> Either Error AppInfo
+parseAppInfo obj =
+  do  a <- get obj "elm-version" (checkVersion Nothing)
+      b <- get obj "dependencies" checkAppDeps
+      c <- get obj "test-deps" checkAppDeps
+      d <- get obj "exact-deps" checkAppDeps
+      e <- get obj "source-directory" checkDir
+      f <- get obj "cache-directory" checkDir
+      g <- get obj "output-directory" checkDir
+      h <- get obj "bundles" checkBundles
+      return (AppInfo a b c d e f g h)
+
+
+parsePkgInfo :: Json.Object -> Either Error PkgInfo
+parsePkgInfo obj =
+  do  a <- get obj "repo" checkRepo
+      b <- get obj "summary" checkSummary
+      c <- get obj "license" checkLicense
+      d <- get obj "version" (checkVersion Nothing)
+      e <- get obj "source-directory" checkDir
+      f <- get obj "cache-directory" checkDir
+      g <- get obj "exposed-modules" checkExposed
+      h <- get obj "dependencies" checkPkgDeps
+      i <- get obj "test-deps" checkPkgDeps
+      j <- get obj "exact-deps" checkAppDeps
+      k <- get obj "elm-version" (checkConstraint Nothing)
+      l <- getFlag obj "native-modules"
+      m <- getFlag obj "effect-modules"
+      return (PkgInfo a b c d e f g h i j k l m)
+
+
+
+-- JSON HELPERS
+
+
+type Field = Text
+
+
+get :: Json.Object -> Field -> Checker a -> Either Error a
+get obj field checker =
+  case HashMap.lookup field obj of
+    Just value ->
+      checker field value
+
+    Nothing ->
+      Left $ Error.Missing field
+
+
+getFlag :: Json.Object -> Field -> Either Error Bool
+getFlag obj field =
+  case HashMap.lookup field obj of
+    Nothing ->
+      Right False
+
+    Just (Json.Bool bool) ->
+      Right bool
+
+    _ ->
+      Left $ Error.BadFlag field
+
+
+onError :: y -> Either x a -> Either y a
+onError err result =
+  mapError (const err) result
+
+
+mapError :: (x -> y) -> Either x a -> Either y a
+mapError func result =
+  case result of
+    Right a ->
+      Right a
+
+    Left err ->
+      Left (func err)
+
+
+jsonToString :: Json.Value -> Error -> Either Error String
+jsonToString value err =
+  Text.unpack <$> jsonToText value err
+
+
+jsonToText :: Json.Value -> Error -> Either Error Text
+jsonToText value err =
+  case value of
+    Json.String text ->
+      Right text
+
+    _ ->
+      Left err
+
+
+getObject :: Json.Value -> Error -> Either Error Json.Object
+getObject value err =
+  case value of
+    Json.Object object ->
+      Right object
+
+    _ ->
+      Left err
+
+
+
+-- CHECKERS
+
+
+type Checker a =
+  Field -> Json.Value -> Either Error a
+
+
+checkVersion :: Maybe Text -> Checker Pkg.Version
+checkVersion context field value =
+  do  let err = Error.BadVersion context field
+      string <- jsonToString value err
+      onError err (Pkg.versionFromString string)
+
+
+checkConstraint :: Maybe Text -> Checker C.Constraint
+checkConstraint context field value =
+  do  let err = Error.BadConstraint context field
+      string <- jsonToString value err
+      maybe (Left err) Right (C.fromString string)
+
+
+checkAppDeps :: Checker ExactDeps
+checkAppDeps field value =
+  do  hashMap <- getObject value (Error.BadAppDeps field)
+      let deps = HashMap.toList hashMap
+      Map.fromList <$> traverse (checkAppDepsHelp field) deps
+
+
+checkAppDepsHelp :: Field -> (Text.Text, Json.Value) -> Either Error (Pkg.Name, Pkg.Version)
+checkAppDepsHelp field (subField, rawVersion) =
+  do  let err = Error.BadAppDepName field subField
+      name <- onError err (Pkg.fromString (Text.unpack subField))
+      version <- checkVersion (Just field) subField rawVersion
+      return (name, version)
+
+
+checkPkgDeps :: Checker Constraints
+checkPkgDeps field value =
+  do  hashMap <- getObject value (Error.BadPkgDeps field)
+      let deps = HashMap.toList hashMap
+      Map.fromList <$> traverse (checkConstraintsHelp field) deps
+
+
+checkConstraintsHelp :: Field -> (Text.Text, Json.Value) -> Either Error (Pkg.Name, C.Constraint)
+checkConstraintsHelp field (text, rawConstraint) =
+  do  let err = Error.BadPkgDepName field text
+      name <- onError err (Pkg.fromString (Text.unpack text))
+      constraint <- checkConstraint (Just field) text rawConstraint
+      return (name, constraint)
+
+
+checkDir :: Checker FilePath
+checkDir field value =
+  jsonToString value (Error.BadDir field)
+
+
+checkSummary :: Checker Text
+checkSummary _field value =
+  do  summary <- jsonToText value Error.BadSummary
+      if Text.length summary < 80
+        then Right summary
+        else Left Error.BadSummary
+
+
+checkLicense :: Checker Licenses.License
+checkLicense _field value =
+  do  license <- jsonToText value (Error.BadLicense [])
+      mapError Error.BadLicense (Licenses.check license)
+
+
+checkRepo :: Checker Repo
+checkRepo field value =
+  do  let err = Error.BadRepo field
+      text <- jsonToText value err
+      case Text.splitOn "/" text of
+        [host, author, project] ->
+          case host of
+            "github.com" ->
+              GitHub author <$> checkProject field project
+
+            "gitlab.com" ->
+              GitLab author <$> checkProject field project
+
+            "bitbucket.com" ->
+              BitBucket author <$> checkProject field project
+
+            _ ->
+              Left err
+
+        _ ->
+          Left err
+
+
+checkProject :: Field -> Text -> Either Error Text
+checkProject _field _rawProjectName =
+  error "TODO - make sure it is a valid project name / probably share with Elm.Package"
+
+
+checkBundles :: Checker Bundles
+checkBundles _field _value =
+  error "TODO"
+
+
+checkExposed :: Checker [Module.Raw]
+checkExposed field value =
+  case value of
+    Json.Array vector ->
+      do  let getName entry = jsonToText entry (Error.BadExposed field)
+          nameVector <- traverse getName vector
+          let names = Vector.toList nameVector
+          mapError (Error.BadExposedName field) $
+            traverse getModuleName names
+
+    _ ->
+      Left $ Error.BadExposed field
+
+
+getModuleName :: Text -> Either Text Module.Raw
+getModuleName text =
+  case Module.nameFromString (Text.unpack text) of
+    Just name ->
+      Right name
+
+    Nothing ->
+      Left text
+
+
+
+-- CASTING PROJECTS
+
+
+forcePkg :: Project -> Task.Task PkgInfo
+forcePkg config =
+  case config of
+    App _ ->
+      Task.throw (error "TODO")
+
+    Pkg pkgConfig ->
+      return pkgConfig
+
+
+
+-- READING AND WRITING FILES
+
+
+path :: FilePath
+path =
+  Assets.configPath
+
+
+
+-- READ
+
+
+read :: Task.Task Project
+read =
+  do  exists <- liftIO (Dir.doesFileExist Assets.configPath)
+      if exists
+        then unsafeRead Assets.configPath
+        else createConfig
+
+
+unsafeRead :: FilePath -> Task.Task Project
+unsafeRead filePath =
+  do  byteString <- liftIO (BS.readFile filePath)
+      case parse byteString of
+        Right config ->
+          return config
+
+        Left err ->
+          Task.throw (GeneralError.CorruptConfig path err)
+
+
+createConfig :: Task.Task Project
+createConfig =
+  do  liftIO $ putStr newProjectMessage
+      yes <- liftIO CL.yesOrNo
+      if yes then createConfigYes else liftIO createConfigNo
+
+
+newProjectMessage :: String
+newProjectMessage =
+  "It looks like you are starting a brand new Elm project!\n\
+  \\n\
+  \A typical Elm application is set up like this:\n\
+  \\n\
+  \  elm.config      # a config file for package dependencies and settings\n\
+  \  src/Main.elm    # a src/ directory where all the Elm code lives\n\
+  \\n\
+  \Do you want me to set that up for you? [Y/n] "
+
+
+createConfigNo :: IO a
+createConfigNo =
+  do  putStrLn "\nOkay, maybe later!"
+      Exit.exitSuccess
+
+
+createConfigYes :: Task.Task Project
+createConfigYes =
+  do  config <- App <$> defaultAppInfo
+      liftIO $ do
+        write Assets.configPath config
+        Dir.createDirectoryIfMissing True "src"
+        BS.writeFile ("src" </> "Main.elm") defaultProgram
+      return config
+
+
+
+-- WRITE
+
+
+write :: FilePath -> Project -> IO ()
+write filePath config =
+  writeFile filePath (configToString config)
+
+
+configToString :: Project -> String
+configToString _config =
+  error "TODO"
+
+
+
+-- DEFAULTS
+
+
+defaultAppInfo :: Task.Task AppInfo
+defaultAppInfo =
+  do  deps <- error "TODO getDefaultDeps"
+      return $
+        AppInfo
+          { _app_elm_version = Compiler.version
+          , _app_dependencies = deps
+          , _app_test_deps = Map.empty
+          , _app_exact_deps = Map.empty
+          , _app_source_dir = "src"
+          , _app_cache_dir = "elm-cache"
+          , _app_output_dir = "elm-output"
+          , _app_bundles = error "TODO"
+          }
+
+
+defaultProgram :: BS.ByteString
+defaultProgram =
+  "-- Learn about how this works in the official Elm guide:\n\
+  \-- https://guide.elm-lang.org\n\
+  \\n\
+  \import Html exposing (Html, beginnerProgram, div, button, text)\n\
+  \import Html.Events exposing (onClick)\n\
+  \\n\
+  \\n\
+  \\n\
+  \main =\n\
+  \  beginnerProgram { model = model, view = view, update = update }\n\
+  \\n\
+  \\n\
+  \\n\
+  \-- MODEL\n\
+  \\n\
+  \\n\
+  \type alias Model =\n\
+  \  Int\n\
+  \\n\
+  \\n\
+  \model : Model\n\
+  \model =\n\
+  \  0\n\
+  \\n\
+  \\n\
+  \\n\
+  \-- UPDATE\n\
+  \\n\
+  \\n\
+  \type Msg\n\
+  \  = Increment\n\
+  \  | Decrement\n\
+  \\n\
+  \\n\
+  \update : Msg -> Model -> Model\n\
+  \update msg model =\n\
+  \  case msg of\n\
+  \    Increment ->\n\
+  \      model + 1\n\
+  \\n\
+  \    Decrement ->\n\
+  \      model - 1\n\
+  \\n\
+  \\n\
+  \\n\
+  \-- VIEW\n\
+  \\n\
+  \\n\
+  \view : Model -> Html Msg\n\
+  \view model =\n\
+  \  div []\n\
+  \    [ button [ onClick Decrement ] [ text \"-\" ]\n\
+  \    , div [] [ text (toString model) ]\n\
+  \    , button [ onClick Increment ] [ text \"+\" ]\n\
+  \    ]\n"
