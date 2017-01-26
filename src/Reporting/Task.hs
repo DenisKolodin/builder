@@ -3,7 +3,7 @@
 module Reporting.Task
   ( Task, run, throw
   , Env
-  , getVersionsPath, getPkgCachePath, getConfigPath
+  , getVersionsPath, getPkgCachePath, getProjectPath
   , write, writeDoc
   , interleave
   , fetch, fetchUrl, makeUrl
@@ -89,10 +89,10 @@ getPkgCachePath name version =
       return dir
 
 
-getConfigPath :: Name -> Version -> Task FilePath
-getConfigPath name version =
+getProjectPath :: Name -> Version -> Task FilePath
+getProjectPath name version =
   do  dir <- getPkgCachePath name version
-      return (dir </> Assets.configPath)
+      return (dir </> Assets.projectPath)
 
 
 getCacheDirectory :: Task FilePath

@@ -347,13 +347,13 @@ getModuleName text =
 
 
 forcePkg :: Project -> Task.Task PkgInfo
-forcePkg config =
-  case config of
+forcePkg project =
+  case project of
     App _ ->
       Task.throw (error "TODO")
 
-    Pkg pkgConfig ->
-      return pkgConfig
+    Pkg info ->
+      return info
 
 
 
@@ -362,7 +362,7 @@ forcePkg config =
 
 path :: FilePath
 path =
-  Assets.configPath
+  Assets.projectPath
 
 
 
@@ -371,28 +371,28 @@ path =
 
 read :: Task.Task Project
 read =
-  do  exists <- liftIO (Dir.doesFileExist Assets.configPath)
+  do  exists <- liftIO (Dir.doesFileExist Assets.projectPath)
       if exists
-        then unsafeRead Assets.configPath
-        else createConfig
+        then unsafeRead Assets.projectPath
+        else createProject
 
 
 unsafeRead :: FilePath -> Task.Task Project
 unsafeRead filePath =
   do  byteString <- liftIO (BS.readFile filePath)
       case parse byteString of
-        Right config ->
-          return config
+        Right project ->
+          return project
 
         Left err ->
-          Task.throw (GeneralError.CorruptConfig path err)
+          Task.throw (GeneralError.CorruptProject path err)
 
 
-createConfig :: Task.Task Project
-createConfig =
+createProject :: Task.Task Project
+createProject =
   do  liftIO $ putStr newProjectMessage
       yes <- liftIO CL.yesOrNo
-      if yes then createConfigYes else liftIO createConfigNo
+      if yes then createProjectYes else liftIO createProjectNo
 
 
 newProjectMessage :: String
@@ -401,26 +401,26 @@ newProjectMessage =
   \\n\
   \A typical Elm application is set up like this:\n\
   \\n\
-  \  elm.config      # a config file for package dependencies and settings\n\
+  \  elm.json        # dependencies and settings for your project\n\
   \  src/Main.elm    # a src/ directory where all the Elm code lives\n\
   \\n\
   \Do you want me to set that up for you? [Y/n] "
 
 
-createConfigNo :: IO a
-createConfigNo =
+createProjectNo :: IO a
+createProjectNo =
   do  putStrLn "\nOkay, maybe later!"
       Exit.exitSuccess
 
 
-createConfigYes :: Task.Task Project
-createConfigYes =
-  do  config <- App <$> defaultAppInfo
+createProjectYes :: Task.Task Project
+createProjectYes =
+  do  project <- App <$> defaultAppInfo
       liftIO $ do
-        write Assets.configPath config
+        write Assets.projectPath project
         Dir.createDirectoryIfMissing True "src"
         BS.writeFile ("src" </> "Main.elm") defaultProgram
-      return config
+      return project
 
 
 
@@ -428,12 +428,12 @@ createConfigYes =
 
 
 write :: FilePath -> Project -> IO ()
-write filePath config =
-  writeFile filePath (configToString config)
+write filePath project =
+  writeFile filePath (projectToString project)
 
 
-configToString :: Project -> String
-configToString _config =
+projectToString :: Project -> String
+projectToString _project =
   error "TODO"
 
 
