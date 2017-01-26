@@ -11,19 +11,22 @@ module Reporting.Error
 
 import Data.Function (on)
 import qualified Data.List as List
-import qualified Elm.Compiler as Compiler
-import qualified Elm.Package as Pkg
-import qualified Elm.Package.Constraint as C
-import qualified Elm.Package.Paths as Path
 import GHC.IO.Handle (hIsTerminalDevice)
 import System.IO (hPutStr, stderr)
 import qualified Text.EditDistance as Dist
 import Text.PrettyPrint.ANSI.Leijen
-  ( Doc, (<+>), (<>), align, displayS, displayIO, dullred, dullyellow, fillSep
-  , hardline, indent, plain, red, renderPretty, text, underline, vcat
+  ( Doc, (<+>), (<>), align, displayS, displayIO, dullred
+  , dullyellow, fillSep, hardline, indent, plain, red
+  , renderPretty, text, underline, vcat
   )
 
 import qualified Diff.Magnitude as Diff
+import qualified Elm.Assets as Assets
+import qualified Elm.Compiler as Compiler
+import qualified Elm.Package as Pkg
+
+import qualified Elm.Project.Constraint as C
+import qualified Reporting.Error.Project as Project
 
 
 
@@ -35,10 +38,9 @@ data Error
   | SystemCallFailed String
   | HttpRequestFailed String String
   | ZipDownloadFailed Pkg.Name Pkg.Version
-  | CorruptJson String Pkg.Name Pkg.Version String
-  | CorruptDescription String
+  | CorruptJson String
+  | CorruptProject FilePath Project.Error
   | CorruptDocumentation String
-  | CorruptSolution String
   | CorruptVersionCache Pkg.Name
   | PackageNotFound Pkg.Name [Pkg.Name]
   | AddTrickyConstraint Pkg.Name Pkg.Version C.Constraint
@@ -145,25 +147,14 @@ toMessage err =
         )
         []
 
-    CorruptJson path name version problem ->
-      Message
-        ( "I just fetched " ++ path ++ " for " ++ Pkg.toString name
-          ++ " " ++ Pkg.versionToString version
-          ++ ", but I cannot read the contents."
-        )
-        [ reflow $
-            "Maybe it is a very old file, and the file format changed since then?\
-            \ Or maybe you are at a hotel or airport where they hijack your HTTP\
-            \ requests and redirect you to some log in page? The particular problem\
-            \ I am seeing is:"
-        , text problem
-        ]
+    CorruptJson _url ->
+      error "TODO"
 
-    CorruptDescription problem ->
+    CorruptProject path problem ->
       Message
-        ( "The description in " ++ Path.description ++ " is not valid."
+        ( "Your " ++ path ++ " is invalid."
         )
-        [ text problem
+        [ error "TODO" problem
         ]
 
     CorruptDocumentation problem ->
@@ -171,14 +162,6 @@ toMessage err =
         ( "I was able to produce documentation for your package, but it is not valid.\
           \ My guess is that the elm-package and elm-make on your PATH are not from the\
           \ same version of Elm, but it could be some other similarly crazy thing."
-        )
-        [ text problem
-        ]
-
-    CorruptSolution problem ->
-      Message
-        ( "Your " ++ Path.solvedDependencies ++ " file is corrupted. Do not modify it\
-          \ by hand! You can just delete it and I will recreate a valid one."
         )
         [ text problem
         ]
@@ -197,7 +180,7 @@ toMessage err =
           [] ->
             [ reflow $
                 "One way to rebuild your constraints is to clear everything out of\
-                \ the \"dependencies\" field of " ++ Path.description ++ " and add\
+                \ the \"dependencies\" field of " ++ Assets.projectPath ++ " and add\
                 \ them back one at a time with `elm-package install`."
             , reflow $
                 "I hope to automate this in the future, but at least there is\
@@ -218,7 +201,7 @@ toMessage err =
 
     AddTrickyConstraint name version constraint ->
       Message
-        ( "This change is too tricky for me. Your " ++ Path.description
+        ( "This change is too tricky for me. Your " ++ Assets.projectPath
           ++ " already lists the following dependency:"
         )
         [ indent 4 $ text $ showDependency name constraint
@@ -231,7 +214,7 @@ toMessage err =
             , C.toString (C.untilNextMajor version)
             ]
         , reflow $
-            "Modify " ++ Path.description ++ " by hand to be exactly what you want."
+            "Modify " ++ Assets.projectPath ++ " by hand to be exactly what you want."
         ]
 
     BadInstall version ->
@@ -259,7 +242,7 @@ toMessage err =
 
     BadMetadata problems ->
       Message
-        ( "Some of the fields in " ++ Path.description ++ " have not been filled in yet:"
+        ( "Some of the fields in " ++ Assets.projectPath ++ " have not been filled in yet:"
         )
         [ vcat (map text problems)
         , text $ "Fill these in and try to publish again!"
@@ -306,31 +289,31 @@ toMessage err =
       in
         Message
           ( "To compute a version bump, I need to start with a version that has\
-            \ already been published. Your " ++ Path.description
+            \ already been published. Your " ++ Assets.projectPath
             ++ " says I should start with version "
             ++ Pkg.versionToString vsn
             ++ ", but I cannot find that version on <http://package.elm-lang.org>."
           )
           [ reflow $
-              "Try again after changing the version in " ++ Path.description ++ list
+              "Try again after changing the version in " ++ Assets.projectPath ++ list
           ]
 
     InvalidBump statedVersion latestVersion ->
       Message
-        ( "Your " ++ Path.description ++ " says the next version should be "
+        ( "Your " ++ Assets.projectPath ++ " says the next version should be "
           ++ Pkg.versionToString statedVersion ++ ", but that is not valid\
           \ based on the previously published versions."
         )
         [ reflow $
             "Generally, you want to put the most recently published version ("
             ++ Pkg.versionToString latestVersion ++ " for this package) in your "
-            ++ Path.description
+            ++ Assets.projectPath
             ++ " and run `elm-package bump` to figure out what should come next."
         ]
 
     BadBump old new magnitude realNew realMagnitude ->
       Message
-        ( "Your " ++ Path.description ++ " says the next version should be "
+        ( "Your " ++ Assets.projectPath ++ " says the next version should be "
           ++ Pkg.versionToString new ++ ", indicating a " ++ show magnitude
           ++ " change to the public API. This does not match the API diff given by:"
         )
@@ -357,7 +340,7 @@ hintToDoc hint =
   case hint of
     EmptyConstraint name constraint ->
       stack
-        [ reflow $ "Your " ++ Path.description ++ " has the following dependency:"
+        [ reflow $ "Your " ++ Assets.projectPath ++ " has the following dependency:"
         , indent 4 $ text $ showDependency name constraint
         , reflow $
             "But there are no released versions in that range! I recommend\
@@ -367,7 +350,7 @@ hintToDoc hint =
 
     IncompatibleConstraint name constraint viableVersion ->
       stack
-        [ reflow $ "Your " ++ Path.description ++ " has the following dependency:"
+        [ reflow $ "Your " ++ Assets.projectPath ++ " has the following dependency:"
         , indent 4 $ text $ showDependency name constraint
         , reflow $
             "But none of the versions in that range work with Elm "
