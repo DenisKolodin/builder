@@ -11,7 +11,7 @@ import qualified System.Directory as Dir
 import qualified System.Environment as Env
 import System.FilePath ((</>))
 
-import qualified Elm.Compiler.Version as Version
+import qualified Elm.Compiler as Compiler
 import qualified Elm.Package as Pkg
 
 
@@ -54,4 +54,4 @@ getRoot projectName =
 
 version :: FilePath
 version =
-  Pkg.versionToString Version.version
+  Pkg.versionToString Compiler.version
