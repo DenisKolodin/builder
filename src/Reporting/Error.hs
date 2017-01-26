@@ -20,7 +20,6 @@ import Text.PrettyPrint.ANSI.Leijen
   , renderPretty, text, underline, vcat
   )
 
-import qualified Diff.Magnitude as Diff
 import qualified Elm.Assets as Assets
 import qualified Elm.Compiler as Compiler
 import qualified Elm.Package as Pkg
@@ -58,7 +57,14 @@ data Error
   | AlreadyPublished Pkg.Version
   | Unbumpable Pkg.Version [Pkg.Version]
   | InvalidBump Pkg.Version Pkg.Version
-  | BadBump Pkg.Version Pkg.Version Diff.Magnitude Pkg.Version Diff.Magnitude
+  | BadBump Pkg.Version Pkg.Version Magnitude Pkg.Version Magnitude
+
+
+data Magnitude
+    = PATCH
+    | MINOR
+    | MAJOR
+    deriving (Eq, Ord, Show)
 
 
 
