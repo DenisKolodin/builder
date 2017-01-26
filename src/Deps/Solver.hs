@@ -1,4 +1,4 @@
-module Install.Solver (solve) where
+module Deps.Solver (solve) where
 
 import Control.Monad (forM)
 import Control.Monad.Except (throwError)
