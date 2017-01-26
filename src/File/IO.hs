@@ -1,4 +1,4 @@
-module Utils.File where
+module File.IO where
 
 import Control.Monad.Except (liftIO, throwError)
 import qualified Data.ByteString.Lazy as LBS
@@ -12,6 +12,7 @@ import System.IO (utf8, hSetEncoding, withBinaryFile, withFile, Handle, IOMode(R
 import System.IO.Error (ioeGetErrorType, annotateIOError, modifyIOError)
 
 import qualified BuildManager as BM
+
 
 
 writeBinary :: (Binary.Binary a) => FilePath -> a -> IO ()

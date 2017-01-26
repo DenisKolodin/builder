@@ -1,6 +1,6 @@
 {-# OPTIONS_GHC -Wall #-}
 {-# LANGUAGE OverloadedStrings #-}
-module Pipeline.Crawl.Package where
+module File.Crawler where
 
 import Control.Arrow (second)
 import Control.Monad.Except (liftIO, throwError)
