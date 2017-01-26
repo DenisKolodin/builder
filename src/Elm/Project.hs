@@ -45,7 +45,7 @@ import qualified Reporting.Task as Task
 data Project
   = App AppInfo
   | Pkg PkgInfo
-  deriving (Generic)
+  deriving (Eq, Generic)
 
 
 data AppInfo =
@@ -59,7 +59,7 @@ data AppInfo =
     , _app_output_dir :: FilePath
     , _app_bundles :: Bundles
     }
-    deriving (Generic)
+    deriving (Eq, Generic)
 
 
 type ExactDeps =
@@ -67,7 +67,7 @@ type ExactDeps =
 
 
 data Bundles = Bundles
-  deriving (Generic)
+  deriving (Eq, Generic)
 
 
 data PkgInfo =
@@ -86,7 +86,7 @@ data PkgInfo =
     , _pkg_natives :: Bool
     , _pkg_effects :: Bool
     }
-    deriving (Generic)
+    deriving (Eq, Generic)
 
 
 type Constraints =
@@ -112,7 +112,7 @@ data Repo
   = GitHub Text Text
   | GitLab Text Text
   | BitBucket Text Text
-  deriving (Generic)
+  deriving (Eq, Generic)
 
 
 toName :: Project -> Maybe Pkg.Name
