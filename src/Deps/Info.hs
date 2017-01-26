@@ -13,10 +13,17 @@ import qualified Elm.Project as Project
 
 
 
+-- INFO
+
+
 data Info =
   Info
     { _deps :: [Project.PkgInfo]
     }
+
+
+
+-- EXPOSED MODULES
 
 
 type ExposedModules =
@@ -24,6 +31,17 @@ type ExposedModules =
 
 
 getExposedModules :: Info -> ExposedModules
-getExposedModules (Info _) =
-  error "TODO"
+getExposedModules (Info deps) =
+  foldr insertPkg Map.empty deps
 
+
+insertPkg :: Project.PkgInfo -> ExposedModules -> ExposedModules
+insertPkg info exposedModules =
+  let
+    home =
+      [ ( Project.pkgName info, Project._pkg_version info ) ]
+
+    insertModule modul dict =
+      Map.insertWith (++) modul home dict
+  in
+    foldr insertModule exposedModules (Project._pkg_exposed info)

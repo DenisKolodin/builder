@@ -3,7 +3,7 @@
 module Elm.Project
   ( Project(..)
   , AppInfo(..)
-  , PkgInfo(..), Repo(..)
+  , PkgInfo(..), Repo(..), pkgName
   , Bundles(..)
   , parse
   , forcePkg
@@ -84,10 +84,27 @@ type Constraints =
   Map.Map Pkg.Name C.Constraint
 
 
+
+-- REPO
+
+
 data Repo
   = GitHub Text Text
   | GitLab Text Text
   | BitBucket Text Text
+
+
+pkgName :: PkgInfo -> Pkg.Name
+pkgName info =
+  case _pkg_repo info of
+    GitHub user project ->
+      Pkg.Name user project
+
+    GitLab user project ->
+      Pkg.Name user project
+
+    BitBucket user project ->
+      Pkg.Name user project
 
 
 
