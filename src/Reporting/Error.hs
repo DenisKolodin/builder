@@ -25,7 +25,7 @@ import qualified Elm.Compiler as Compiler
 import qualified Elm.Package as Pkg
 
 import qualified Elm.Project.Constraint as C
-import qualified Reporting.Error.Project as Project
+import qualified Reporting.Error.Assets as AssetsError
 
 
 
@@ -33,22 +33,16 @@ import qualified Reporting.Error.Project as Project
 
 
 data Error
-  = BadElmVersion Pkg.Version Bool C.Constraint
+  = Assets AssetsError.Error
+  | BadElmVersion Pkg.Version Bool C.Constraint
   | SystemCallFailed String
   | HttpRequestFailed String String
   | ZipDownloadFailed Pkg.Name Pkg.Version
-  | CorruptJson String
-  | CorruptProject FilePath Project.Error
-  | CorruptDocumentation String
-  | CorruptVersionCache Pkg.Name
-  | PackageNotFound Pkg.Name [Pkg.Name]
   | AddTrickyConstraint Pkg.Name Pkg.Version C.Constraint
 
   | ConstraintsHaveNoSolution [Hint]
 
   | BadInstall Pkg.Version
-
-  | CorruptBinary FilePath
 
   | Undiffable
   | VersionInvalid
@@ -155,33 +149,6 @@ toMessage err =
         )
         []
 
-    CorruptJson _url ->
-      error "TODO"
-
-    CorruptProject path problem ->
-      Message
-        ( "Your " ++ path ++ " is invalid."
-        )
-        [ error "TODO" problem
-        ]
-
-    CorruptDocumentation problem ->
-      Message
-        ( "I was able to produce documentation for your package, but it is not valid.\
-          \ My guess is that the elm-package and elm-make on your PATH are not from the\
-          \ same version of Elm, but it could be some other similarly crazy thing."
-        )
-        [ text problem
-        ]
-
-    CorruptVersionCache name ->
-      Message
-        ( "Your .elm/packages/ directory may be corrupted. I was led to believe\
-          \ that " ++ Pkg.toString name ++ " existed, but I could not find anything\
-          \ when I went to look up the published versions of this package."
-        )
-        []
-
     ConstraintsHaveNoSolution hints ->
       Message "I cannot find a set of packages that works with your constraints." $
         case hints of
@@ -197,15 +164,6 @@ toMessage err =
 
           _ ->
             [ stack (map hintToBullet hints) ]
-
-    PackageNotFound package suggestions ->
-      Message
-        ( "Could not find any packages named " ++ Pkg.toString package ++ "."
-        )
-        [ text $ "Here are some packages that have similar names:"
-        , indent 4 $ vcat $ map (text . Pkg.toString) suggestions
-        , text $ "Maybe you want one of those?"
-        ]
 
     AddTrickyConstraint name version constraint ->
       Message

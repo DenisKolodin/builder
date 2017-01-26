@@ -4,7 +4,7 @@ module File.IO
   )
   where
 
-import Control.Monad.Except (liftIO, throwError)
+import Control.Monad.Except (liftIO)
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.Binary as Binary
 import qualified Data.Text as Text
@@ -16,6 +16,7 @@ import System.IO (utf8, hSetEncoding, withBinaryFile, withFile, Handle, IOMode(R
 import System.IO.Error (ioeGetErrorType, annotateIOError, modifyIOError)
 
 import qualified Reporting.Error as Error
+import qualified Reporting.Error.Assets as AError
 import qualified Reporting.Task as Task
 
 
@@ -34,16 +35,21 @@ writeBinary path value =
 readBinary :: (Binary.Binary a) => FilePath -> Task.Task a
 readBinary path =
   do  exists <- liftIO (doesFileExist path)
-      if exists then decode else throwError (Error.CorruptBinary path)
-  where
-    decode =
-      do  bits <- liftIO (LBS.readFile path)
-          case Binary.decodeOrFail bits of
-            Left _ ->
-                throwError (Error.CorruptBinary path)
+      if not exists
+        then throwCorruptBinary path
+        else
+          do  bits <- liftIO (LBS.readFile path)
+              case Binary.decodeOrFail bits of
+                Left _ ->
+                  throwCorruptBinary path
 
-            Right (_, _, value) ->
-                return value
+                Right (_, _, value) ->
+                  return value
+
+
+throwCorruptBinary :: FilePath -> Task.Task a
+throwCorruptBinary filePath =
+  Task.throw (Error.Assets (AError.CorruptBinary filePath))
 
 
 
