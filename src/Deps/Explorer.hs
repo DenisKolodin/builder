@@ -9,7 +9,7 @@ module Deps.Explorer
 {-| It is expensive to load ALL package metadata. You would need to:
 
   1. Know all the packages and all their versions.
-  2. Download or read the elm.config file for each version.
+  2. Download or read the elm.json file for each version.
 
 The goal of this module is to only pay for (1) and pay for (2) as needed.
 -}
