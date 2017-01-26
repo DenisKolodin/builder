@@ -1,3 +1,5 @@
+{-# OPTIONS_GHC -Wall #-}
+{-# LANGUAGE DeriveGeneric #-}
 module Elm.Project.Constraint
   ( Constraint
   , fromString
@@ -12,6 +14,8 @@ module Elm.Project.Constraint
   )
   where
 
+import Data.Binary (Binary)
+import GHC.Generics (Generic)
 import qualified Data.Aeson as Json
 import qualified Data.Text as Text
 
@@ -25,9 +29,17 @@ import qualified Elm.Compiler as Compiler
 
 data Constraint
     = Range Package.Version Op Op Package.Version
+    deriving (Generic)
 
 
-data Op = Less | LessOrEqual
+data Op
+  = Less
+  | LessOrEqual
+  deriving (Generic)
+
+
+instance Binary Constraint
+instance Binary Op
 
 
 

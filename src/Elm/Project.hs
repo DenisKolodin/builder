@@ -1,17 +1,22 @@
 {-# OPTIONS_GHC -Wall #-}
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE OverloadedStrings #-}
 module Elm.Project
   ( Project(..)
   , AppInfo(..)
   , PkgInfo(..), Repo(..)
   , Bundles(..)
-  , toName, toPkgName, toSourceDir, toNative
+  , toName, toPkgName
+  , toSourceDir, toNative, toCacheDir
   , parse
   , forcePkg
   , path, unsafeRead, write
   )
   where
 
+import Data.Binary (Binary)
+import Data.Text (Text)
+import GHC.Generics (Generic)
 import Prelude hiding (read)
 import Control.Monad.Trans (liftIO)
 import qualified Data.Aeson as Json
@@ -19,7 +24,6 @@ import qualified Data.ByteString.Lazy.Char8 as BS
 import qualified Data.HashMap.Strict as HashMap
 import qualified Data.Map as Map
 import qualified Data.Text as Text
-import Data.Text (Text)
 import qualified Data.Vector as Vector
 
 import qualified Elm.Compiler.Module as Module
@@ -41,6 +45,7 @@ import qualified Reporting.Task as Task
 data Project
   = App AppInfo
   | Pkg PkgInfo
+  deriving (Generic)
 
 
 data AppInfo =
@@ -54,6 +59,7 @@ data AppInfo =
     , _app_output_dir :: FilePath
     , _app_bundles :: Bundles
     }
+    deriving (Generic)
 
 
 type ExactDeps =
@@ -61,6 +67,7 @@ type ExactDeps =
 
 
 data Bundles = Bundles
+  deriving (Generic)
 
 
 data PkgInfo =
@@ -79,20 +86,22 @@ data PkgInfo =
     , _pkg_natives :: Bool
     , _pkg_effects :: Bool
     }
+    deriving (Generic)
 
 
 type Constraints =
   Map.Map Pkg.Name C.Constraint
 
 
-destruct :: (AppInfo -> a) -> (PkgInfo -> a) -> Project -> a
-destruct appFunc pkgFunc project =
-  case project of
-    App info ->
-      appFunc info
 
-    Pkg info ->
-      pkgFunc info
+-- BINARY
+
+
+instance Binary Project
+instance Binary AppInfo
+instance Binary PkgInfo
+instance Binary Bundles
+instance Binary Repo
 
 
 
@@ -103,6 +112,7 @@ data Repo
   = GitHub Text Text
   | GitLab Text Text
   | BitBucket Text Text
+  deriving (Generic)
 
 
 toName :: Project -> Maybe Pkg.Name
@@ -124,7 +134,7 @@ toPkgName info =
 
 
 
--- SOURCE DIRECTORIES
+-- EXTRACT INFORMARION
 
 
 toSourceDir :: Project -> FilePath
@@ -132,13 +142,24 @@ toSourceDir project =
   destruct _app_source_dir _pkg_source_dir project
 
 
-
--- NATIVES
+toCacheDir :: Project -> FilePath
+toCacheDir project =
+  destruct _app_cache_dir _pkg_cache_dir project
 
 
 toNative :: Project -> Bool
 toNative project =
   destruct (const False) _pkg_natives project
+
+
+destruct :: (AppInfo -> a) -> (PkgInfo -> a) -> Project -> a
+destruct appFunc pkgFunc project =
+  case project of
+    App info ->
+      appFunc info
+
+    Pkg info ->
+      pkgFunc info
 
 
 
@@ -438,3 +459,4 @@ write filePath project =
 projectToString :: Project -> String
 projectToString _project =
   error "TODO"
+

@@ -1,9 +1,12 @@
 {-# OPTIONS_GHC -Wall #-}
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE OverloadedStrings #-}
 module Elm.Project.Licenses (License, check) where
 
+import Data.Binary (Binary)
 import qualified Data.Map as Map
 import Data.Text (Text)
+import GHC.Generics (Generic)
 
 import Elm.Utils (nearbyNames)
 
@@ -17,7 +20,10 @@ data License =
     { _name :: Text
     , _code :: Text
     }
-  deriving (Eq, Ord)
+  deriving (Eq, Ord, Generic)
+
+
+instance Binary License
 
 
 
