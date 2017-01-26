@@ -39,9 +39,11 @@ insertPkg :: Project.PkgInfo -> ExposedModules -> ExposedModules
 insertPkg info exposedModules =
   let
     home =
-      [ ( Project.pkgName info, Project._pkg_version info ) ]
+      ( Project.toPkgName info
+      , Project._pkg_version info
+      )
 
     insertModule modul dict =
-      Map.insertWith (++) modul home dict
+      Map.insertWith (++) modul [home] dict
   in
     foldr insertModule exposedModules (Project._pkg_exposed info)

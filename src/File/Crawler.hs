@@ -2,68 +2,93 @@
 {-# LANGUAGE OverloadedStrings #-}
 module File.Crawler where
 
-import Control.Arrow (second)
-import Control.Monad.Except (liftIO, throwError)
+import Control.Monad.Except (liftIO)
 import qualified Data.Map as Map
 import qualified Data.Text as Text
-import qualified Elm.Compiler as Compiler
-import qualified Elm.Compiler.Module as Module
-import qualified Elm.Package.Description as Desc
-import qualified Elm.Package as Pkg
-import qualified Elm.Package.Paths as Path
-import qualified Elm.Package.Solution as Solution
-import System.Directory (doesFileExist, getCurrentDirectory, setCurrentDirectory)
+import System.Directory (doesFileExist)
 import System.FilePath ((</>), (<.>))
 
-import qualified BuildManager as BM
-import qualified Utils.File as File
-import TheMasterPlan ( PackageGraph(..), PackageData(..) )
+import qualified Elm.Compiler as Compiler
+import qualified Elm.Compiler.Module as Module
+import Elm.Package (Name, Package)
+
+import qualified Deps.Info as Deps
+import Elm.Project (Project)
+import qualified Elm.Project as Project
+import qualified File.IO as File
+import qualified Reporting.Error as Error
+import qualified Reporting.Error.Assets as E
+import qualified Reporting.Task as Task
+
+
+
+-- GRAPH
+
+
+data Graph =
+  Graph
+    { _modules :: Map.Map Module.Raw Node
+    , _natives :: Map.Map Module.Raw FilePath
+    , _foreigns :: Map.Map Module.Raw Package
+    }
+
+
+data Node =
+  Node
+    { _path :: FilePath
+    , _deps :: [Module.Raw]
+    }
 
 
 
 -- STATE and ENVIRONMENT
 
 
-data Env = Env
-    { _sourceDirs :: [FilePath]
-    , _availableForeignModules :: Map.Map Module.Raw [(Pkg.Name, Pkg.Version)]
-    , _permissions :: BM.Permissions
-    , _allowNatives :: Bool
-    , _packageName :: Pkg.Name
+data Env =
+  Env
+    { _srcDirs :: [FilePath]
+    , _depModules :: Deps.ExposedModules
+    , _permissions :: Permissions
+    , _pkgName :: Maybe Name
+    , _native :: Bool
     }
 
 
-initEnv :: FilePath -> Desc.Description -> Solution.Solution -> BM.Permissions -> BM.Task Env
-initEnv root desc solution permissions =
-  do  availableForeignModules <- readAvailableForeignModules desc solution
-      return $
-        Env
-          (map (root </>) (Desc.sourceDirs desc))
-          availableForeignModules
-          permissions
-          (Desc.natives desc)
-          (Desc.name desc)
+data Permissions
+  = PortsAndEffects
+  | Effects
+  | None
+
+
+initEnv :: FilePath -> Project -> Deps.Info -> Permissions -> Env
+initEnv root project depsInfo permissions =
+  Env
+    [ root </> Project.toSourceDir project ]
+    (Deps.getExposedModules depsInfo)
+    permissions
+    (Project.toName project)
+    (Project.toNative project)
 
 
 
--- GENERIC CRAWLER
+{-- GENERIC CRAWLER
 
 
 dfsFromFiles
   :: FilePath
   -> Solution.Solution
   -> Desc.Description
-  -> BM.Permissions
+  -> Permissions
   -> [FilePath]
-  -> BM.Task ([Module.Raw], PackageGraph)
+  -> Task.Task ([Module.Raw], Graph)
 dfsFromFiles root solution desc permissions filePaths =
   do  env <- initEnv root desc solution permissions
 
-      info <- mapM (readPackageData env Nothing) filePaths
+      info <- mapM (readDeps env Nothing) filePaths
       let names = map fst info
       let unvisited = concatMap (snd . snd) info
       let pkgData = Map.fromList (map (second fst) info)
-      let initialGraph = PackageGraph pkgData Map.empty Map.empty
+      let initialGraph = Graph pkgData Map.empty Map.empty
 
       summary <- dfs env unvisited initialGraph
 
@@ -74,13 +99,15 @@ dfsFromExposedModules
   :: FilePath
   -> Solution.Solution
   -> Desc.Description
-  -> BM.Permissions
-  -> BM.Task PackageGraph
+  -> Permissions
+  -> Task.Task Graph
 dfsFromExposedModules root solution desc permissions =
   do  env <- initEnv root desc solution permissions
       let unvisited = map (Unvisited Nothing) (Desc.exposed desc)
-      let summary = PackageGraph Map.empty Map.empty Map.empty
+      let summary = Graph Map.empty Map.empty Map.empty
       dfs env unvisited summary
+
+--}
 
 
 
@@ -94,57 +121,55 @@ data Unvisited =
     }
 
 
-dfs :: Env -> [Unvisited] -> PackageGraph -> BM.Task PackageGraph
-dfs env unvisited summary =
+dfs :: Env -> [Unvisited] -> Graph -> Task.Task Graph
+dfs env unvisited graph =
   case unvisited of
     [] ->
-      return summary
+      return graph
 
-    next@(Unvisited _ name) : rest ->
-      if Map.member name (packageData summary) then
-        dfs env rest summary
+    next : rest ->
+      if Map.member (_name next) (_modules graph) then
+        dfs env rest graph
 
       else
-        dfsHelp env next rest summary
+        dfsHelp env next rest graph
 
 
-dfsHelp :: Env -> Unvisited -> [Unvisited] -> PackageGraph -> BM.Task PackageGraph
-dfsHelp env (Unvisited maybeParent name) unvisited summary =
+dfsHelp :: Env -> Unvisited -> [Unvisited] -> Graph -> Task.Task Graph
+dfsHelp env (Unvisited maybeParent name) unvisited graph =
   do  -- find all paths that match the unvisited module name
-      filePaths <-
-        find (_allowNatives env) name (_sourceDirs env)
+      filePaths <- find (_native env) name (_srcDirs env)
 
       -- see if we found a unique path for the name
-      case (filePaths, Map.lookup name (_availableForeignModules env)) of
+      case (filePaths, Map.lookup name (_depModules env)) of
         ([Elm filePath], Nothing) ->
-            do  (statedName, (pkgData, newUnvisited)) <-
-                    readPackageData env (Just name) filePath
+          do  (_, node, newUnvisited) <- readDeps env (Just name) filePath
 
-                dfs env (newUnvisited ++ unvisited) $ summary {
-                    packageData = Map.insert statedName pkgData (packageData summary)
-                }
+              dfs env (newUnvisited ++ unvisited) $
+                graph { _modules = Map.insert name node (_modules graph) }
 
         ([JS filePath], Nothing) ->
-            dfs env unvisited $ summary {
-                packageNatives = Map.insert name filePath (packageNatives summary)
-            }
+            dfs env unvisited $
+              graph { _natives = Map.insert name filePath (_natives graph) }
 
         ([], Just [pkg]) ->
-            dfs env unvisited $ summary {
-                packageForeignDependencies =
-                    Map.insert name pkg (packageForeignDependencies summary)
-            }
+            dfs env unvisited $
+              graph { _foreigns = Map.insert name pkg (_foreigns graph) }
 
         ([], Nothing) ->
-            throwError (BM.ModuleNotFound name maybeParent)
+            throw (E.ModuleNotFound name maybeParent)
 
         (_, maybePkgs) ->
-            throwError $
-              BM.ModuleDuplicates
-                name
-                maybeParent
-                (map toFilePath filePaths)
-                (maybe [] (map fst) maybePkgs)
+          let
+            locals = map toFilePath filePaths
+            foreigns = maybe [] (map fst) maybePkgs
+          in
+            throw $ E.ModuleDuplicates name maybeParent locals foreigns
+
+
+throw :: E.Error -> Task.Task a
+throw assetsError =
+  Task.throw (Error.Assets assetsError)
 
 
 
@@ -161,20 +186,20 @@ toFilePath codePath =
     JS file -> file
 
 
-find :: Bool -> Module.Raw -> [FilePath] -> BM.Task [CodePath]
-find allowNatives moduleName sourceDirs =
-    findHelp allowNatives [] moduleName sourceDirs
+find :: Bool -> Module.Raw -> [FilePath] -> Task.Task [CodePath]
+find allowsNative moduleName sourceDirs =
+    findHelp allowsNative [] moduleName sourceDirs
 
 
-findHelp :: Bool -> [CodePath] -> Module.Raw -> [FilePath] -> BM.Task [CodePath]
-findHelp _allowNatives locations _moduleName [] =
+findHelp :: Bool -> [CodePath] -> Module.Raw -> [FilePath] -> Task.Task [CodePath]
+findHelp _allowsNative locations _moduleName [] =
   return locations
 
-findHelp allowNatives locations moduleName (dir:srcDirs) =
+findHelp allowsNative locations moduleName (dir:srcDirs) =
   do  locations' <- addElmPath locations
       updatedLocations <-
-          if allowNatives then addJsPath locations' else return locations'
-      findHelp allowNatives updatedLocations moduleName srcDirs
+          if allowsNative then addJsPath locations' else return locations'
+      findHelp allowsNative updatedLocations moduleName srcDirs
   where
     consIf bool x xs =
         if bool then x:xs else xs
@@ -196,114 +221,56 @@ findHelp allowNatives locations moduleName (dir:srcDirs) =
 
 
 
--- READ and VALIDATE PACKAGE DATA for an ELM file
+-- READ DEPENDENCIES
 
 
-readPackageData
+readDeps
   :: Env
   -> Maybe Module.Raw
   -> FilePath
-  -> BM.Task (Module.Raw, (PackageData, [Unvisited]))
-readPackageData env maybeName filePath =
-  do  sourceCode <- liftIO (File.readTextUtf8 filePath)
+  -> Task.Task (Module.Raw, Node, [Unvisited])
+readDeps env maybeName filePath =
+  do  source <- liftIO (File.readUtf8 filePath)
 
       (tag, name, deps) <-
-          case Compiler.parseDependencies (_packageName env) sourceCode of
-            Right result ->
-                return result
+        case Compiler.parseDependencies (_pkgName env) source of
+          Right result ->
+            return result
 
-            Left msg ->
-                throwError (BM.CompilerErrors filePath sourceCode [msg])
+          Left msg ->
+            Task.throw (Error.BadCompile filePath source [msg])
 
       checkName filePath name maybeName
       checkTag filePath name (_permissions env) tag
 
       return
         ( name
-        , ( PackageData filePath deps
-          , map (Unvisited (Just name)) deps
-          )
+        , Node filePath deps
+        , map (Unvisited (Just name)) deps
         )
 
 
-checkName :: FilePath -> Module.Raw -> Maybe Module.Raw -> BM.Task ()
+checkName :: FilePath -> Module.Raw -> Maybe Module.Raw -> Task.Task ()
 checkName path nameFromSource maybeName =
   case maybeName of
     Just nameFromPath | nameFromSource /= nameFromPath ->
-      throwError (BM.ModuleName path nameFromPath nameFromSource)
+      throw (E.ModuleNameMismatch path nameFromPath nameFromSource)
 
     _ ->
       return ()
 
 
-checkTag :: FilePath -> Module.Raw -> BM.Permissions -> Compiler.Tag -> BM.Task ()
+checkTag :: FilePath -> Module.Raw -> Permissions -> Compiler.Tag -> Task.Task ()
 checkTag filePath name permissions tag =
   case (permissions, tag) of
-    (BM.PortsAndEffects, _) ->
+    (PortsAndEffects, _) ->
       return ()
 
     (_, Compiler.Port) ->
-      throwError (BM.UnpublishablePorts filePath name)
+      throw (E.UnpublishablePorts filePath name)
 
-    (BM.None, Compiler.Effect)  ->
-      throwError (BM.UnpublishableEffects filePath name)
+    (None, Compiler.Effect)  ->
+      throw (E.UnpublishableEffects filePath name)
 
     (_, _) ->
       return ()
-
-
-
--- FOREIGN MODULES -- which ones are available, who exposes them?
-
-
-readAvailableForeignModules
-    :: Desc.Description
-    -> Solution.Solution
-    -> BM.Task (Map.Map Module.Raw [(Pkg.Name, Pkg.Version)])
-readAvailableForeignModules desc solution =
-  do  visiblePackages <- allVisible desc solution
-      rawLocations <- mapM exposedModules visiblePackages
-      return (Map.unionsWith (++) rawLocations)
-
-
-allVisible
-    :: Desc.Description
-    -> Solution.Solution
-    -> BM.Task [(Pkg.Name, Pkg.Version)]
-allVisible desc solution =
-    mapM getVersion visible
-  where
-    visible =
-        map fst (Desc.dependencies desc)
-
-    getVersion :: Pkg.Name -> BM.Task (Pkg.Name, Pkg.Version)
-    getVersion name =
-        case Map.lookup name solution of
-          Just version ->
-              return (name, version)
-
-          Nothing ->
-              throwError (BM.MissingPackage name)
-
-
-exposedModules
-    :: (Pkg.Name, Pkg.Version)
-    -> BM.Task (Map.Map Module.Raw [(Pkg.Name, Pkg.Version)])
-exposedModules packageID@(pkgName, version) =
-    within (Path.package pkgName version) $ do
-        description <- Desc.read BM.PackageProblem Path.description
-        let exposed = Desc.exposed description
-        return (foldr insert Map.empty exposed)
-  where
-    insert moduleName dict =
-      Map.insert moduleName [packageID] dict
-
-
-within :: FilePath -> BM.Task a -> BM.Task a
-within directory command =
-    do  root <- liftIO getCurrentDirectory
-        liftIO (setCurrentDirectory directory)
-        result <- command
-        liftIO (setCurrentDirectory root)
-        return result
-

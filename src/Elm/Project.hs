@@ -3,8 +3,9 @@
 module Elm.Project
   ( Project(..)
   , AppInfo(..)
-  , PkgInfo(..), Repo(..), pkgName
+  , PkgInfo(..), Repo(..)
   , Bundles(..)
+  , toName, toPkgName, toSourceDir, toNative
   , parse
   , forcePkg
   , path, unsafeRead, write
@@ -84,6 +85,16 @@ type Constraints =
   Map.Map Pkg.Name C.Constraint
 
 
+destruct :: (AppInfo -> a) -> (PkgInfo -> a) -> Project -> a
+destruct appFunc pkgFunc project =
+  case project of
+    App info ->
+      appFunc info
+
+    Pkg info ->
+      pkgFunc info
+
+
 
 -- REPO
 
@@ -94,8 +105,13 @@ data Repo
   | BitBucket Text Text
 
 
-pkgName :: PkgInfo -> Pkg.Name
-pkgName info =
+toName :: Project -> Maybe Pkg.Name
+toName project =
+  destruct (const Nothing) (Just . toPkgName) project
+
+
+toPkgName :: PkgInfo -> Pkg.Name
+toPkgName info =
   case _pkg_repo info of
     GitHub user project ->
       Pkg.Name user project
@@ -105,6 +121,24 @@ pkgName info =
 
     BitBucket user project ->
       Pkg.Name user project
+
+
+
+-- SOURCE DIRECTORIES
+
+
+toSourceDir :: Project -> FilePath
+toSourceDir project =
+  destruct _app_source_dir _pkg_source_dir project
+
+
+
+-- NATIVES
+
+
+toNative :: Project -> Bool
+toNative project =
+  destruct (const False) _pkg_natives project
 
 
 

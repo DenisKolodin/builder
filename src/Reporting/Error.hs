@@ -10,6 +10,7 @@ module Reporting.Error
   where
 
 import Data.Function (on)
+import Data.Text (Text)
 import qualified Data.List as List
 import GHC.IO.Handle (hIsTerminalDevice)
 import System.IO (hPutStr, stderr)
@@ -34,26 +35,31 @@ import qualified Reporting.Error.Assets as AssetsError
 
 data Error
   = Assets AssetsError.Error
+
+  -- misc
   | BadElmVersion Pkg.Version Bool C.Constraint
   | SystemCallFailed String
   | HttpRequestFailed String String
   | ZipDownloadFailed Pkg.Name Pkg.Version
   | AddTrickyConstraint Pkg.Name Pkg.Version C.Constraint
-
   | ConstraintsHaveNoSolution [Hint]
-
   | BadInstall Pkg.Version
 
+  -- diffs
   | Undiffable
   | VersionInvalid
   | VersionJustChanged
   | BadMetadata [String]
   | MissingTag Pkg.Version
 
+  -- bumps
   | AlreadyPublished Pkg.Version
   | Unbumpable Pkg.Version [Pkg.Version]
   | InvalidBump Pkg.Version Pkg.Version
   | BadBump Pkg.Version Pkg.Version Magnitude Pkg.Version Magnitude
+
+  -- compilation
+  | BadCompile FilePath Text [Compiler.Error]
 
 
 data Magnitude

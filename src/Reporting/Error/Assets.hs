@@ -8,6 +8,7 @@ module Reporting.Error.Assets
 
 import Data.Text (Text)
 
+import qualified Elm.Compiler.Module as Module
 import qualified Elm.Package as Pkg
 
 
@@ -21,6 +22,20 @@ data Error
   | CorruptVersionCache Pkg.Name
   | PackageNotFound Pkg.Name [Pkg.Name]
   | CorruptBinary FilePath
+  | ModuleNotFound Module.Raw (Maybe Module.Raw)
+  | ModuleDuplicates
+      { _name :: Module.Raw
+      , _parent :: Maybe Module.Raw
+      , _local :: [FilePath]
+      , _foreign :: [Pkg.Name]
+      }
+  | ModuleNameMismatch
+      { _path :: FilePath
+      , _expectedName :: Module.Raw
+      , _actualName :: Module.Raw
+      }
+  | UnpublishablePorts FilePath Module.Raw
+  | UnpublishableEffects FilePath Module.Raw
 
 
 
