@@ -48,6 +48,8 @@ data Error
 
   | BadInstall Pkg.Version
 
+  | CorruptBinary FilePath
+
   | Undiffable
   | VersionInvalid
   | VersionJustChanged

@@ -1,4 +1,8 @@
-module File.IO where
+module File.IO
+  ( writeBinary, readBinary
+  , writeUtf8, readUtf8
+  )
+  where
 
 import Control.Monad.Except (liftIO, throwError)
 import qualified Data.ByteString.Lazy as LBS
@@ -11,8 +15,12 @@ import System.FilePath (dropFileName)
 import System.IO (utf8, hSetEncoding, withBinaryFile, withFile, Handle, IOMode(ReadMode, WriteMode))
 import System.IO.Error (ioeGetErrorType, annotateIOError, modifyIOError)
 
-import qualified BuildManager as BM
+import qualified Reporting.Error as Error
+import qualified Reporting.Task as Task
 
+
+
+-- BINARY
 
 
 writeBinary :: (Binary.Binary a) => FilePath -> a -> IO ()
@@ -23,61 +31,59 @@ writeBinary path value =
           LBS.hPut handle (Binary.encode value)
 
 
-readBinary :: (Binary.Binary a) => FilePath -> BM.Task a
+readBinary :: (Binary.Binary a) => FilePath -> Task.Task a
 readBinary path =
   do  exists <- liftIO (doesFileExist path)
-      if exists then decode else throwError (BM.CorruptedArtifact path)
+      if exists then decode else throwError (Error.CorruptBinary path)
   where
     decode =
       do  bits <- liftIO (LBS.readFile path)
           case Binary.decodeOrFail bits of
             Left _ ->
-                throwError (BM.CorruptedArtifact path)
+                throwError (Error.CorruptBinary path)
 
             Right (_, _, value) ->
                 return value
 
 
-{-|
-  readStringUtf8 converts Text to String instead of reading
-  a String directly because System.IO.hGetContents is lazy,
-  and with lazy IO, decoding exception cannot be caught.
-  By using the strict Text type, we force any decoding
-  exceptions to be thrown so we can show our UTF-8 message.
--}
-readStringUtf8 :: FilePath -> IO String
-readStringUtf8 name =
-  readTextUtf8 name >>= (return . Text.unpack)
+
+-- WRITE UTF-8
 
 
-readTextUtf8 :: FilePath -> IO Text.Text
-readTextUtf8 name =
-  let action handle =
-        modifyIOError (convertUtf8Error name) (TextIO.hGetContents handle)
-  in
-    withFileUtf8 name ReadMode action
+writeUtf8 :: FilePath -> Text.Text -> IO ()
+writeUtf8 filePath text =
+  withUtf8 filePath WriteMode $ \handle ->
+    TextIO.hPutStr handle text
 
 
-convertUtf8Error :: FilePath -> IOError -> IOError
-convertUtf8Error filepath e =
-  case ioeGetErrorType e of
-    InvalidArgument -> utf8Error
-    _ -> e
-  where
-    errorMessage = "Bad encoding; the file must be valid UTF-8"
-    utf8Error = annotateIOError (userError errorMessage) "" Nothing (Just filepath)
+withUtf8 :: FilePath -> IOMode -> (Handle -> IO a) -> IO a
+withUtf8 filePath mode callback =
+  withFile filePath mode $ \handle ->
+    do  hSetEncoding handle utf8
+        callback handle
 
 
-writeStringUtf8 :: FilePath -> String -> IO ()
-writeStringUtf8 f str =
-  writeTextUtf8 f (Text.pack str)
+
+-- READ UTF-8
 
 
-writeTextUtf8 :: FilePath -> Text.Text -> IO ()
-writeTextUtf8 f txt =
-  withFileUtf8 f WriteMode (\handle -> TextIO.hPutStr handle txt)
+readUtf8 :: FilePath -> IO Text.Text
+readUtf8 filePath =
+  withUtf8 filePath ReadMode $ \handle ->
+    modifyIOError
+      (encodingError filePath)
+      (TextIO.hGetContents handle)
 
 
-withFileUtf8 :: FilePath -> IOMode -> (Handle -> IO a) -> IO a
-withFileUtf8 f mode action =
-  withFile f mode (\handle -> hSetEncoding handle utf8 >> action handle)
+encodingError :: FilePath -> IOError -> IOError
+encodingError filepath ioError =
+  case ioeGetErrorType ioError of
+    InvalidArgument ->
+      annotateIOError
+        (userError "Bad encoding; the file must be valid UTF-8")
+        ""
+        Nothing
+        (Just filepath)
+
+    _ ->
+      ioError
