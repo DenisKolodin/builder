@@ -1,9 +1,10 @@
 {-# OPTIONS_GHC -Wall -fno-warn-unused-do-bind #-}
 {-# LANGUAGE OverloadedStrings #-}
 module Reporting.Task
-  ( Task, run, throw
+  ( Task, run, throw, try
   , Env
-  , getVersionsPath, getPkgCachePath, getProjectPath
+  , getVersionsPath
+  , getPackageCachePath, getPackageInfoPath
   , write, writeDoc
   , interleave
   , fetch, fetchUrl, makeUrl
@@ -15,7 +16,7 @@ import Control.Concurrent (forkIO)
 import Control.Concurrent.Chan (newChan, readChan, writeChan)
 import Control.Concurrent.ParallelIO.Local (withPool, parallelInterleaved)
 import Control.Monad (forever)
-import Control.Monad.Except (ExceptT, runExceptT, throwError)
+import Control.Monad.Except (ExceptT, runExceptT, catchError, throwError)
 import Control.Monad.Reader (ReaderT, runReaderT, ask, asks)
 import Control.Monad.Trans (liftIO)
 import qualified Data.ByteString.Char8 as BSC
@@ -71,6 +72,11 @@ throw =
   throwError
 
 
+try :: a -> Task a -> Task a
+try recover task =
+  catchError task (\_ -> return recover)
+
+
 
 -- CACHING
 
@@ -81,18 +87,18 @@ getVersionsPath =
       return (cacheDir </> "versions.dat")
 
 
-getPkgCachePath :: Name -> Version -> Task FilePath
-getPkgCachePath name version =
+getPackageCachePath :: Name -> Version -> Task FilePath
+getPackageCachePath name version =
   do  cacheDir <- getCacheDirectory
       let dir = cacheDir </> Pkg.toFilePath name </> Pkg.versionToString version
       liftIO (createDirectoryIfMissing True dir)
       return dir
 
 
-getProjectPath :: Name -> Version -> Task FilePath
-getProjectPath name version =
-  do  dir <- getPkgCachePath name version
-      return (dir </> Assets.projectPath)
+getPackageInfoPath :: Name -> Version -> Task FilePath
+getPackageInfoPath name version =
+  do  cacheDir <- getPackageCachePath name version
+      return (cacheDir </> "elm.dat")
 
 
 getCacheDirectory :: Task FilePath

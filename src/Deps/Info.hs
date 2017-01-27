@@ -1,11 +1,16 @@
+{-# OPTIONS_GHC -Wall #-}
+{-# LANGUAGE DeriveGeneric #-}
 module Deps.Info
   ( Info
+  , fromInfoList
   , ExposedModules
   , getExposedModules
   )
   where
 
+import Data.Binary (Binary)
 import qualified Data.Map as Map
+import GHC.Generics (Generic)
 
 import Elm.Compiler.Module as Module
 import Elm.Package (Name, Version)
@@ -20,6 +25,15 @@ data Info =
   Info
     { _deps :: [Project.PkgInfo]
     }
+    deriving (Generic)
+
+
+instance Binary Info
+
+
+fromInfoList :: [Project.PkgInfo] -> Info
+fromInfoList deps =
+  Info deps
 
 
 

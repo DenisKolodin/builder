@@ -1,6 +1,7 @@
 module File.IO
   ( writeBinary, readBinary
   , writeUtf8, readUtf8
+  , remove
   )
   where
 
@@ -10,7 +11,7 @@ import qualified Data.Binary as Binary
 import qualified Data.Text as Text
 import qualified Data.Text.IO as TextIO
 import GHC.IO.Exception ( IOErrorType(InvalidArgument) )
-import System.Directory (createDirectoryIfMissing, doesFileExist)
+import System.Directory (createDirectoryIfMissing, doesFileExist, removeFile)
 import System.FilePath (dropFileName)
 import System.IO (utf8, hSetEncoding, withBinaryFile, withFile, Handle, IOMode(ReadMode, WriteMode))
 import System.IO.Error (ioeGetErrorType, annotateIOError, modifyIOError)
@@ -24,12 +25,13 @@ import qualified Reporting.Task as Task
 -- BINARY
 
 
-writeBinary :: (Binary.Binary a) => FilePath -> a -> IO ()
+writeBinary :: (Binary.Binary a) => FilePath -> a -> Task.Task ()
 writeBinary path value =
-  do  let dir = dropFileName path
-      createDirectoryIfMissing True dir
-      withBinaryFile path WriteMode $ \handle ->
-          LBS.hPut handle (Binary.encode value)
+  liftIO $
+    do  let dir = dropFileName path
+        createDirectoryIfMissing True dir
+        withBinaryFile path WriteMode $ \handle ->
+            LBS.hPut handle (Binary.encode value)
 
 
 readBinary :: (Binary.Binary a) => FilePath -> Task.Task a
@@ -82,14 +84,23 @@ readUtf8 filePath =
 
 
 encodingError :: FilePath -> IOError -> IOError
-encodingError filepath ioError =
+encodingError filePath ioError =
   case ioeGetErrorType ioError of
     InvalidArgument ->
       annotateIOError
         (userError "Bad encoding; the file must be valid UTF-8")
         ""
         Nothing
-        (Just filepath)
+        (Just filePath)
 
     _ ->
       ioError
+
+
+
+-- REMOVE FILES
+
+
+remove :: FilePath -> Task.Task ()
+remove filePath =
+  liftIO (removeFile filePath)

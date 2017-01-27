@@ -6,8 +6,11 @@ module Elm.Project
   , AppInfo(..)
   , PkgInfo(..), Repo(..)
   , Bundles(..)
+  , ExactDeps
   , toName, toPkgName
   , toSourceDir, toNative, toCacheDir
+  , matchesCompilerVersion
+  , toExactDeps
   , parse
   , forcePkg
   , path, unsafeRead, write
@@ -26,6 +29,7 @@ import qualified Data.Map as Map
 import qualified Data.Text as Text
 import qualified Data.Vector as Vector
 
+import qualified Elm.Compiler as Compiler
 import qualified Elm.Compiler.Module as Module
 import qualified Elm.Package as Pkg
 
@@ -160,6 +164,31 @@ destruct appFunc pkgFunc project =
 
     Pkg info ->
       pkgFunc info
+
+
+matchesCompilerVersion :: Project -> Bool
+matchesCompilerVersion project =
+  case project of
+    App info ->
+      _app_elm_version info == Compiler.version
+
+    Pkg info ->
+      C.isSatisfied (_pkg_elm_version info) Compiler.version
+
+
+-- TODO update deps to match the Elm JSON decoders for this
+toExactDeps :: Project -> ExactDeps
+toExactDeps project =
+  case project of
+    App info ->
+      Map.unions
+        [ _app_dependencies info
+        , _app_test_deps info
+        , _app_exact_deps info
+        ]
+
+    Pkg info ->
+      _pkg_exact_deps info
 
 
 

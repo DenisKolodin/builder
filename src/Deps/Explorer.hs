@@ -1,8 +1,10 @@
 {-# OPTIONS_GHC -Wall #-}
 module Deps.Explorer
-  ( Metadata, Deps(..)
+  ( Metadata, Cons(..)
   , Explorer, run
-  , getVersions, getDeps
+  , getVersions
+  , getContraints
+  , getPackageInfo
   )
   where
 
@@ -18,21 +20,21 @@ The goal of this module is to only pay for (1) and pay for (2) as needed.
 import Control.Monad (when)
 import Control.Monad.Except (throwError)
 import Control.Monad.State (StateT, evalStateT)
-import Control.Monad.RWS (lift, liftIO, asks, gets, modify)
+import Control.Monad.RWS (lift, liftIO, gets, modify)
 import qualified Data.Binary as Binary
 import qualified Data.ByteString.Lazy as BS
 import Data.Map (Map)
 import qualified Data.Map as Map
-import qualified Data.Time.Clock as Time
 import qualified System.Directory as Dir
-import System.FilePath ((</>))
 
 import Elm.Package (Name, Version)
 
 import qualified Deps.Website as Website
 import qualified Elm.Project as Project
 import Elm.Project.Constraint (Constraint)
+import qualified File.IO as IO
 import qualified Reporting.Error as Error
+import qualified Reporting.Error.Assets as E
 import qualified Reporting.Task as Task
 
 
@@ -43,12 +45,12 @@ import qualified Reporting.Task as Task
 data Metadata =
   Metadata
     { _vsns :: Map Name [Version]
-    , _deps :: Map (Name, Version) Deps
+    , _cons :: Map (Name, Version) Cons
     }
 
 
-data Deps =
-  Deps
+data Cons =
+  Cons
     { _elm :: Constraint
     , _pkgs :: Map Name Constraint
     }
@@ -130,47 +132,46 @@ getVersions name =
           return versions
 
         Nothing ->
-          throwError $ Error.CorruptVersionCache name
+          throwError (Error.Assets (E.CorruptVersionCache name))
 
 
 
--- GET DEPENDENCIES
+-- CONSTRAINTS
 
 
-getDeps :: Name -> Version -> Explorer Deps
-getDeps name version =
-  do  allDeps <- gets _deps
-      case Map.lookup (name, version) allDeps of
-        Just deps ->
-          return deps
+getContraints :: Name -> Version -> Explorer Cons
+getContraints name version =
+  do  allCons <- gets _cons
+      case Map.lookup (name, version) allCons of
+        Just cons ->
+          return cons
 
         Nothing ->
-          do  projectPath <- lift $ Task.getProjectPath name version
-              exists <- liftIO $ Dir.doesFileExist projectPath
+          do  info <- lift $ getPackageInfo name version
 
-              -- get package information
-              info <-
-                lift $
-                  if exists
-                    then Project.forcePkg =<< Project.unsafeRead projectPath
-                    else fetchPkgInfo name version projectPath
+              -- extract constraints
+              let elm = Project._pkg_elm_version info
+              let pkgs = Project._pkg_dependencies info
+              let cons = Cons elm pkgs
 
-              -- just extract the dependencies
-              let deps =
-                    Deps
-                      (Project._pkg_elm_version info)
-                      (Project._pkg_dependencies info)
-
-              -- Keep the deps in memory in case we need them again
+              -- Keep the cons in memory in case we need them again
               modify $ \store ->
-                store { _deps = Map.insert (name, version) deps (_deps store) }
+                store { _cons = Map.insert (name, version) cons (_cons store) }
 
-              return deps
+              return cons
 
 
-fetchPkgInfo :: Name -> Version -> FilePath -> Task.Task Project.PkgConfig
-fetchPkgInfo name version projectPath =
-  do  config <- Website.getPkgInfo name version
-      liftIO $ Project.write projectPath (Project.Pkg config)
-      return config
 
+-- PACKAGE INFO
+
+
+getPackageInfo :: Name -> Version -> Task.Task Project.PkgInfo
+getPackageInfo name version =
+  do  infoPath <- Task.getPackageInfoPath name version
+      exists <- liftIO $ Dir.doesFileExist infoPath
+      if exists
+        then IO.readBinary infoPath
+        else
+          do  info <- Website.getPkgInfo name version
+              IO.writeBinary infoPath info
+              return info
