@@ -31,16 +31,13 @@ type Interfaces =
 
 data CanonicalModule =
   CanonicalModule
-    { _pkg :: Package
+    { _pkg :: Pkg.Package
     , _name :: Module.Raw
     }
     deriving (Eq, Ord, Generic)
 
 
 instance Binary CanonicalModule
-
-
-type Package = (Pkg.Name, Pkg.Version)
 
 
 
@@ -68,6 +65,6 @@ rebuild depsInfo =
         return ifaces
 
 
-rebuildHelp :: Interfaces -> Package -> Task.Task Interfaces
+rebuildHelp :: Interfaces -> Pkg.Package -> Task.Task Interfaces
 rebuildHelp ifaces (name, version) =
   error "TODO" ifaces name version
