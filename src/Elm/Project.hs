@@ -8,7 +8,7 @@ module Elm.Project
   , Bundles(..)
   , ExactDeps
   , toName, toPkgName
-  , toSourceDir, toNative, toCacheDir
+  , toSourceDir, toNative
   , matchesCompilerVersion
   , toExactDeps
   , parse
@@ -59,7 +59,6 @@ data AppInfo =
     , _app_test_deps :: ExactDeps
     , _app_exact_deps :: ExactDeps
     , _app_source_dir :: FilePath
-    , _app_cache_dir :: FilePath
     , _app_output_dir :: FilePath
     , _app_bundles :: Bundles
     }
@@ -81,7 +80,6 @@ data PkgInfo =
     , _pkg_license :: Licenses.License
     , _pkg_version :: Pkg.Version
     , _pkg_source_dir :: FilePath
-    , _pkg_cache_dir :: FilePath
     , _pkg_exposed :: [Module.Raw]
     , _pkg_dependencies :: Constraints
     , _pkg_test_deps :: Constraints
@@ -144,11 +142,6 @@ toPkgName info =
 toSourceDir :: Project -> FilePath
 toSourceDir project =
   destruct _app_source_dir _pkg_source_dir project
-
-
-toCacheDir :: Project -> FilePath
-toCacheDir project =
-  destruct _app_cache_dir _pkg_cache_dir project
 
 
 toNative :: Project -> Bool
@@ -216,10 +209,9 @@ parseAppInfo obj =
       c <- get obj "test-deps" checkAppDeps
       d <- get obj "exact-deps" checkAppDeps
       e <- get obj "source-directory" checkDir
-      f <- get obj "cache-directory" checkDir
-      g <- get obj "output-directory" checkDir
-      h <- get obj "bundles" checkBundles
-      return (AppInfo a b c d e f g h)
+      f <- get obj "output-directory" checkDir
+      g <- get obj "bundles" checkBundles
+      return (AppInfo a b c d e f g)
 
 
 parsePkgInfo :: Json.Object -> Either ProjectError PkgInfo
@@ -229,15 +221,14 @@ parsePkgInfo obj =
       c <- get obj "license" checkLicense
       d <- get obj "version" (checkVersion Nothing)
       e <- get obj "source-directory" checkDir
-      f <- get obj "cache-directory" checkDir
-      g <- get obj "exposed-modules" checkExposed
-      h <- get obj "dependencies" checkPkgDeps
-      i <- get obj "test-deps" checkPkgDeps
-      j <- get obj "exact-deps" checkAppDeps
-      k <- get obj "elm-version" (checkConstraint Nothing)
-      l <- getFlag obj "native-modules"
-      m <- getFlag obj "effect-modules"
-      return (PkgInfo a b c d e f g h i j k l m)
+      f <- get obj "exposed-modules" checkExposed
+      g <- get obj "dependencies" checkPkgDeps
+      h <- get obj "test-deps" checkPkgDeps
+      i <- get obj "exact-deps" checkAppDeps
+      j <- get obj "elm-version" (checkConstraint Nothing)
+      k <- getFlag obj "native-modules"
+      l <- getFlag obj "effect-modules"
+      return (PkgInfo a b c d e f g h i j k l)
 
 
 

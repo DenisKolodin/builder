@@ -12,13 +12,13 @@ import qualified Elm.Compiler as Compiler
 import qualified Elm.Compiler.Module as Module
 import Elm.Package (Name, Package)
 
-import qualified Deps.Info as Deps
 import Elm.Project (Project)
 import qualified Elm.Project as Project
 import qualified File.IO as File
 import qualified Reporting.Error as Error
 import qualified Reporting.Error.Assets as E
 import qualified Reporting.Task as Task
+import qualified Stuff.Validate as Stuff
 
 
 
@@ -47,7 +47,7 @@ data Node =
 data Env =
   Env
     { _srcDirs :: [FilePath]
-    , _depModules :: Deps.ExposedModules
+    , _depModules :: Stuff.ExposedModules
     , _permissions :: Permissions
     , _pkgName :: Maybe Name
     , _native :: Bool
@@ -60,11 +60,11 @@ data Permissions
   | None
 
 
-initEnv :: FilePath -> Project -> Deps.Info -> Permissions -> Env
+initEnv :: FilePath -> Project -> Stuff.DepsInfo -> Permissions -> Env
 initEnv root project depsInfo permissions =
   Env
     [ root </> Project.toSourceDir project ]
-    (Deps.getExposedModules depsInfo)
+    (Stuff.getExposedModules depsInfo)
     permissions
     (Project.toName project)
     (Project.toNative project)

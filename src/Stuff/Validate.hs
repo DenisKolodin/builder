@@ -1,44 +1,88 @@
-module Deps.Validate
-  ( validate
+{-# OPTIONS_GHC -Wall #-}
+{-# LANGUAGE DeriveGeneric #-}
+module Stuff.Validate
+  ( DepsInfo
+  , ExposedModules
+  , getExposedModules
+  , validate
   )
   where
 
 
+import Data.Binary (Binary)
 import qualified Data.Map as Map
-import System.FilePath ((</>))
+import GHC.Generics (Generic)
 
 import qualified Elm.Compiler as Compiler
+import qualified Elm.Compiler.Module as Module
 import Elm.Package (Name, Version)
 
 import qualified Deps.Explorer as Explorer
-import Deps.Info as Deps
 import Elm.Project (Project, PkgInfo, ExactDeps)
 import qualified Elm.Project as Project
 import qualified Elm.Project.Constraint as C
 import qualified File.IO as IO
 import qualified Reporting.Task as Task
+import qualified Stuff.Paths as Path
+
+
+
+-- DEPS INFO
+
+
+data DepsInfo =
+  DepsInfo
+    { _deps :: [Project.PkgInfo]
+    }
+    deriving (Generic)
+
+
+instance Binary DepsInfo
+
+
+
+-- EXPOSED MODULES
+
+
+type ExposedModules =
+  Map.Map Module.Raw [(Name, Version)]
+
+
+getExposedModules :: DepsInfo -> ExposedModules
+getExposedModules (DepsInfo deps) =
+  foldr insertPkg Map.empty deps
+
+
+insertPkg :: Project.PkgInfo -> ExposedModules -> ExposedModules
+insertPkg info exposedModules =
+  let
+    home =
+      ( Project.toPkgName info
+      , Project._pkg_version info
+      )
+
+    insertModule modul dict =
+      Map.insertWith (++) modul [home] dict
+  in
+    foldr insertModule exposedModules (Project._pkg_exposed info)
 
 
 
 -- VALIDATE
 
 
-validate :: Project -> Task.Task Deps.Info
+validate :: Project -> Task.Task DepsInfo
 validate project =
   let
-    -- TODO - get rid of cacheDir configuration
-    cacheDir =
-      Project.toCacheDir project
-
     safeIsValid =
       Task.try False $
-        do  cacheProject <- IO.readBinary (cacheDir </> "elm.dat")
+        do  cacheProject <- IO.readBinary Path.pkgInfo
             return (isValid cacheProject project)
   in
     do  valid <- safeIsValid
         if valid
-          then IO.readBinary (cacheDir </> "deps.dat")
-          else rebuildCache cacheDir project
+          then IO.readBinary Path.deps
+          else rebuildCache project
 
 
 
@@ -59,8 +103,8 @@ isValid p1 p2 =
 -- ACTUALLY VALIDATE
 
 
-rebuildCache :: FilePath -> Project -> Task.Task Deps.Info
-rebuildCache cacheDir project =
+rebuildCache :: Project -> Task.Task DepsInfo
+rebuildCache project =
   -- gather transitive dependencies
   -- read all of their elm.json files
   -- make sure all constraints are satisfied
@@ -69,18 +113,17 @@ rebuildCache cacheDir project =
 
   do  -- get rid of cached information
       -- TODO build artifacts too?
-      IO.remove (cacheDir </> "elm.dat")
-      IO.remove (cacheDir </> "deps.dat")
-      IO.remove (cacheDir </> "ifaces.dat")
+      IO.remove Path.pkgInfo
+      IO.remove Path.deps
+      IO.remove Path.ifaces
 
       -- validate solution
       let solution = Project.toExactDeps project
-      depsInfo <- Deps.fromInfoList <$>
+      depsInfo <- DepsInfo <$>
         traverse (readDep solution) (Map.toList solution)
 
-      IO.writeBinary (cacheDir </> "elm.dat") project
-      IO.writeBinary (cacheDir </> "deps.dat") depsInfo
-      writeInterfaces (cacheDir </> "ifaces.dat") solution
+      IO.writeBinary Path.pkgInfo project
+      IO.writeBinary Path.deps depsInfo
 
       return depsInfo
 
@@ -118,13 +161,3 @@ checkDep solution depName subDepName constraint =
 
       else
         Task.throw (error "TODO" depName subDepName)
-
-
-
--- WRITE INTERFACES
-
-
-writeInterfaces :: FilePath -> ExactDeps -> Task.Task ()
-writeInterfaces ifacePath solution =
-  error "TODO" ifacePath solution
-
