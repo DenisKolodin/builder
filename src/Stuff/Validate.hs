@@ -3,6 +3,7 @@
 module Stuff.Validate
   ( DepsInfo
   , ExposedModules
+  , getPackages
   , getExposedModules
   , validate
   )
@@ -38,6 +39,14 @@ data DepsInfo =
 
 
 instance Binary DepsInfo
+
+
+getPackages :: DepsInfo -> [(Name,Version)]
+getPackages (DepsInfo deps) =
+  flip map deps $ \info ->
+    ( Project.toPkgName info
+    , Project.toPkgVersion info
+    )
 
 
 

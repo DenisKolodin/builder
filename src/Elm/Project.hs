@@ -7,7 +7,7 @@ module Elm.Project
   , PkgInfo(..), Repo(..)
   , Bundles(..)
   , ExactDeps
-  , toName, toPkgName
+  , toName, toPkgName, toPkgVersion
   , toSourceDir, toNative
   , matchesCompilerVersion
   , toExactDeps
@@ -133,6 +133,11 @@ toPkgName info =
 
     BitBucket user project ->
       Pkg.Name user project
+
+
+toPkgVersion :: PkgInfo -> Pkg.Version
+toPkgVersion info =
+  _pkg_version info
 
 
 
