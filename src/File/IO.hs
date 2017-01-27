@@ -103,4 +103,8 @@ encodingError filePath ioError =
 
 remove :: FilePath -> Task.Task ()
 remove filePath =
-  liftIO (removeFile filePath)
+  liftIO $
+    do  exists <- doesFileExist filePath
+        if exists
+          then removeFile filePath
+          else return ()
