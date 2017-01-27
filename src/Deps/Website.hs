@@ -7,27 +7,15 @@ module Deps.Website
   )
   where
 
-import Control.Exception (catch, throwIO)
-import Control.Monad.Except (throwError)
-import Control.Monad.RWS (liftIO, asks)
-import Data.Aeson ((.:))
-import qualified Data.Aeson as Json
 import qualified Data.Binary as Binary
-import qualified Data.ByteString.Lazy as LBS
 import qualified Data.Map as Map
-import Network.HTTP
 import qualified Network.HTTP.Client as Client
 import qualified Network.HTTP.Client.MultipartFormData as Multi
-import System.Directory (createDirectoryIfMissing, doesFileExist, removeFile)
-import System.FilePath ((</>), dropFileName)
-import System.IO.Error (isDoesNotExistError)
 
 import Elm.Package (Name, Version)
 import qualified Elm.Package as Package
 
-import qualified Elm.Docs as Docs
 import qualified Elm.Project as Project
-import qualified Reporting.Error as Error
 import qualified Reporting.Task as Task
 
 
