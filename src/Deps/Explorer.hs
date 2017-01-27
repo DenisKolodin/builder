@@ -27,10 +27,11 @@ import qualified Data.Time.Clock as Time
 import qualified System.Directory as Dir
 import System.FilePath ((</>))
 
-import qualified Dependencies.Website as Website
 import Elm.Package (Name, Version)
-import Elm.Package.Constraint (Constraint)
-import qualified Elm.Config as Config
+
+import qualified Deps.Website as Website
+import qualified Elm.Project as Project
+import Elm.Project.Constraint (Constraint)
 import qualified Reporting.Error as Error
 import qualified Reporting.Task as Task
 
@@ -144,21 +145,21 @@ getDeps name version =
           return deps
 
         Nothing ->
-          do  configPath <- lift $ Task.getConfigPath name version
-              exists <- liftIO $ Dir.doesFileExist configPath
+          do  projectPath <- lift $ Task.getProjectPath name version
+              exists <- liftIO $ Dir.doesFileExist projectPath
 
-              -- get the config information
-              config <-
+              -- get package information
+              info <-
                 lift $
                   if exists
-                    then Config.forcePkg =<< Config.unsafeRead configPath
-                    else fetchConfig name version configPath
+                    then Project.forcePkg =<< Project.unsafeRead projectPath
+                    else fetchPkgInfo name version projectPath
 
               -- just extract the dependencies
               let deps =
                     Deps
-                      (Config._pkg_elm_version config)
-                      (Config._pkg_dependencies config)
+                      (Project._pkg_elm_version info)
+                      (Project._pkg_dependencies info)
 
               -- Keep the deps in memory in case we need them again
               modify $ \store ->
@@ -167,9 +168,9 @@ getDeps name version =
               return deps
 
 
-fetchConfig :: Name -> Version -> FilePath -> Task.Task Config.PkgConfig
-fetchConfig name version configPath =
-  do  config <- Website.getPkgConfig name version
-      liftIO $ Config.write configPath (Config.Pkg config)
+fetchPkgInfo :: Name -> Version -> FilePath -> Task.Task Project.PkgConfig
+fetchPkgInfo name version projectPath =
+  do  config <- Website.getPkgInfo name version
+      liftIO $ Project.write projectPath (Project.Pkg config)
       return config
 

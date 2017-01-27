@@ -1,8 +1,9 @@
 {-# OPTIONS_GHC -Wall #-}
 {-# LANGUAGE OverloadedStrings #-}
 module Deps.Website
-  ( getPkgConfig
-  , getNewPackages, getAllPackages
+  ( getPkgInfo
+  , getNewPackages
+  , getAllPackages
   )
   where
 
@@ -21,25 +22,26 @@ import System.Directory (createDirectoryIfMissing, doesFileExist, removeFile)
 import System.FilePath ((</>), dropFileName)
 import System.IO.Error (isDoesNotExistError)
 
-import qualified Elm.Config as Config
-import qualified Elm.Docs as Docs
-import qualified Elm.Package as Package
 import Elm.Package (Name, Version)
+import qualified Elm.Package as Package
+
+import qualified Elm.Docs as Docs
+import qualified Elm.Project as Project
 import qualified Reporting.Error as Error
 import qualified Reporting.Task as Task
 
 
 
--- GET CONFIG
+-- GET PACKAGE INFO
 
 
-getPkgConfig :: Name -> Version -> Task.Task Config.PkgConfig
-getPkgConfig name version =
+getPkgInfo :: Name -> Version -> Task.Task Project.PkgInfo
+getPkgInfo name version =
   let
     path =
       "packages/" ++ Package.toUrl name
       ++ "/" ++ Package.versionToString version
-      ++ "/elm.config"
+      ++ "/elm.json"
 
     fetchContent =
       Task.fetch path [] $ \request manager ->
@@ -47,9 +49,9 @@ getPkgConfig name version =
             return (Client.responseBody response)
   in
     do  json <- fetchContent
-        case Config.parse json of
-          Right (Config.Pkg config) ->
-            return config
+        case Project.parse json of
+          Right (Project.Pkg info) ->
+            return info
 
           _ ->
             Task.throw (error "TODO")
