@@ -12,6 +12,7 @@ module Stuff.Validate
 
 import Data.Binary (Binary)
 import qualified Data.Map as Map
+import qualified Data.Set as Set
 import GHC.Generics (Generic)
 
 import qualified Elm.Compiler as Compiler
@@ -57,9 +58,19 @@ type ExposedModules =
   Map.Map Module.Raw [(Name, Version)]
 
 
-getExposedModules :: DepsInfo -> ExposedModules
-getExposedModules (DepsInfo deps) =
-  foldr insertPkg Map.empty deps
+getExposedModules :: Project -> DepsInfo -> ExposedModules
+getExposedModules project (DepsInfo deps) =
+  let
+    directSet =
+      Project.toDirectDeps project
+
+    isDirect info =
+      Set.member (Project.toPkgName info) directSet
+
+    directDeps =
+      filter isDirect deps
+  in
+    foldr insertPkg Map.empty directDeps
 
 
 insertPkg :: Project.PkgInfo -> ExposedModules -> ExposedModules
@@ -98,14 +109,24 @@ validate project =
 -- DOES PROJECT MATCH CACHE?
 
 
--- TODO - detect elm.json changes more cleverly
---
--- Full equality is not actually necessary. It is fine if the
--- summary or license changes. Only changes in dependencies
--- really matter.
+{-| The project is considered valid if:
+
+  - All *transitive* dependencies are the same. That means
+    all the same packages with the exact same versions.
+
+  - All *direct* dependencies are the same. That means
+    of the transitive dependencies, the same subset of
+    packages is available for use by your project.
+
+This means you can change version, summaries, licenses,
+output directories, etc. We just need to be sure that
+elm.dat, deps.dat, and ifaces.dat are all correct.
+-}
 isValid :: Project -> Project -> Bool
 isValid p1 p2 =
-  p1 == p2 && Project.matchesCompilerVersion p1
+  Project.matchesCompilerVersion p1
+  && Project.toSolution p1 == Project.toSolution p2
+  && Project.toDirectDeps p1 == Project.toDirectDeps p2
 
 
 
@@ -114,12 +135,6 @@ isValid p1 p2 =
 
 rebuildCache :: Project -> Task.Task DepsInfo
 rebuildCache project =
-  -- gather transitive dependencies
-  -- read all of their elm.json files
-  -- make sure all constraints are satisfied
-  --   if yes, write new elm.dat and deps.dat / return info
-  --   if no, error or "would you like me to revert to the last valid state?"
-
   do  -- get rid of cached information
       -- TODO build artifacts too?
       IO.remove Path.pkgInfo
@@ -127,7 +142,7 @@ rebuildCache project =
       IO.remove Path.ifaces
 
       -- validate solution
-      let solution = Project.toExactDeps project
+      let solution = Project.toSolution project
       depsInfo <- DepsInfo <$>
         traverse (readDep solution) (Map.toList solution)
 

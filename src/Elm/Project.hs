@@ -10,7 +10,7 @@ module Elm.Project
   , toName, toPkgName, toPkgVersion
   , toSourceDir, toNative
   , matchesCompilerVersion
-  , toExactDeps
+  , toSolution, toDirectDeps
   , parse
   , forcePkg
   , path, unsafeRead, write
@@ -26,6 +26,7 @@ import qualified Data.Aeson as Json
 import qualified Data.ByteString.Lazy.Char8 as BS
 import qualified Data.HashMap.Strict as HashMap
 import qualified Data.Map as Map
+import qualified Data.Set as Set
 import qualified Data.Text as Text
 import qualified Data.Vector as Vector
 
@@ -175,8 +176,8 @@ matchesCompilerVersion project =
 
 
 -- TODO update deps to match the Elm JSON decoders for this
-toExactDeps :: Project -> ExactDeps
-toExactDeps project =
+toSolution :: Project -> ExactDeps
+toSolution project =
   case project of
     App info ->
       Map.unions
@@ -187,6 +188,22 @@ toExactDeps project =
 
     Pkg info ->
       _pkg_exact_deps info
+
+
+toDirectDeps :: Project -> Set.Set Pkg.Name
+toDirectDeps project =
+  case project of
+    App info ->
+      Set.unions
+        [ Map.keysSet (_app_dependencies info)
+        , Map.keysSet (_app_test_deps info)
+        ]
+
+    Pkg info ->
+      Set.unions
+        [ Map.keysSet (_pkg_dependencies info)
+        , Map.keysSet (_pkg_test_deps info)
+        ]
 
 
 
