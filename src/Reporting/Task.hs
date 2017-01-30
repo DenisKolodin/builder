@@ -5,24 +5,20 @@ module Reporting.Task
   , Env
   , getVersionsPath
   , getPackageCachePath, getPackageInfoPath
-  , write, writeDoc
+  , report
   , interleave
   , fetch, fetchUrl, makeUrl
   )
   where
 
 import qualified Control.Exception as E
-import Control.Concurrent (forkIO)
-import Control.Concurrent.Chan (newChan, readChan, writeChan)
 import Control.Concurrent.ParallelIO.Local (withPool, parallelInterleaved)
-import Control.Monad (forever)
 import Control.Monad.Except (ExceptT, runExceptT, catchError, throwError)
 import Control.Monad.Reader (ReaderT, runReaderT, ask, asks)
 import Control.Monad.Trans (liftIO)
 import qualified Data.ByteString.Char8 as BSC
 import qualified Data.List as List
 import qualified Data.Version as Version
-import GHC.IO.Handle (hIsTerminalDevice)
 import qualified Network
 import qualified Network.HTTP as Http (urlEncodeVars)
 import qualified Network.HTTP.Client as Http
@@ -30,14 +26,13 @@ import qualified Network.HTTP.Client.TLS as Http
 import qualified Network.HTTP.Types as Http
 import System.Directory (createDirectoryIfMissing)
 import System.FilePath ((</>))
-import System.IO (stdout)
-import Text.PrettyPrint.ANSI.Leijen (Doc, displayIO, plain, renderPretty, text)
 
 import qualified Elm.Assets as Assets
 import qualified Elm.Package as Pkg
 import Elm.Package (Name, Version)
 import qualified Paths_elm_package
 import qualified Reporting.Error as Error
+import qualified Reporting.Progress as Progress
 
 
 
@@ -53,17 +48,16 @@ data Env =
     { _maxConcurrentDownloads :: Int
     , _cacheDirectory :: FilePath
     , _httpManager :: Http.Manager
-    , _writer :: Doc -> IO ()
+    , _reporter :: Progress.Reporter
     }
 
 
-run :: Task a -> IO (Either Error.Error a)
-run task =
+run :: Progress.Reporter -> Task a -> IO (Either Error.Error a)
+run reporter task =
   Network.withSocketsDo $
     do  cacheDir <- Assets.getPackageRoot
         httpManager <- Http.newManager Http.tlsManagerSettings
-        writer <- createWriter
-        let env = Env 4 cacheDir httpManager writer
+        let env = Env 4 cacheDir httpManager reporter
         runReaderT (runExceptT task) env
 
 
@@ -107,31 +101,13 @@ getCacheDirectory =
 
 
 
--- WRITER
+-- REPORTER
 
 
-createWriter :: IO (Doc -> IO ())
-createWriter =
-  do  chan <- newChan
-      isTerminal <- hIsTerminalDevice stdout
-
-      forkIO $ forever $
-        do  doc <- readChan chan
-            displayIO stdout $ renderPretty 1 80 $
-              if isTerminal then doc else plain doc
-
-      return $ writeChan chan
-
-
-write :: String -> Task ()
-write message =
-  writeDoc (text message)
-
-
-writeDoc :: Doc -> Task ()
-writeDoc doc =
-  do  writer <- asks _writer
-      liftIO (writer doc)
+report :: Progress.Progress -> Task ()
+report progress =
+  do  reporter <- asks _reporter
+      liftIO (reporter progress)
 
 
 
