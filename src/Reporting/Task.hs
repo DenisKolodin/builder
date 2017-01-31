@@ -18,7 +18,6 @@ import Control.Monad.Reader (ReaderT, runReaderT, ask, asks)
 import Control.Monad.Trans (liftIO)
 import qualified Data.ByteString.Char8 as BSC
 import qualified Data.List as List
-import qualified Data.Version as Version
 import qualified Network
 import qualified Network.HTTP as Http (urlEncodeVars)
 import qualified Network.HTTP.Client as Http
@@ -28,9 +27,9 @@ import System.Directory (createDirectoryIfMissing)
 import System.FilePath ((</>))
 
 import qualified Elm.Assets as Assets
+import qualified Elm.Compiler as Compiler
 import qualified Elm.Package as Pkg
 import Elm.Package (Name, Version)
-import qualified Paths_elm_package
 import qualified Reporting.Error as Error
 import qualified Reporting.Progress as Progress
 
@@ -150,7 +149,7 @@ makeUrl path params =
 versionParam :: (String, String)
 versionParam =
   ( "elm-package-version"
-  , Version.showVersion Paths_elm_package.version
+  , Pkg.versionToString Compiler.version
   )
 
 
