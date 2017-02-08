@@ -56,7 +56,7 @@ defaultAppInfo =
           , _app_source_dir = "src"
           , _app_cache_dir = "elm-cache"
           , _app_output_dir = "elm-output"
-          , _app_bundles = error "TODO"
+          , _app_bundles = error "TODO _app_bundles"
           }
 
 

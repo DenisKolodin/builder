@@ -67,4 +67,4 @@ rebuild depsInfo =
 
 rebuildHelp :: Interfaces -> Pkg.Package -> Task.Task Interfaces
 rebuildHelp ifaces (name, version) =
-  error "TODO" ifaces name version
+  error "TODO rebuildHelp" ifaces name version

@@ -2,9 +2,8 @@
 {-# LANGUAGE DeriveGeneric #-}
 module Stuff.Validate
   ( DepsInfo
-  , ExposedModules
   , getPackages
-  , getExposedModules
+  , getDepModules, DepModules
   , validate
   )
   where
@@ -51,15 +50,15 @@ getPackages (DepsInfo deps) =
 
 
 
--- EXPOSED MODULES
+-- DEPENDENCY MODULES
 
 
-type ExposedModules =
+type DepModules =
   Map.Map Module.Raw [(Name, Version)]
 
 
-getExposedModules :: Project -> DepsInfo -> ExposedModules
-getExposedModules project (DepsInfo deps) =
+getDepModules :: Project -> DepsInfo -> DepModules
+getDepModules project (DepsInfo deps) =
   let
     directSet =
       Project.toDirectDeps project
@@ -73,8 +72,8 @@ getExposedModules project (DepsInfo deps) =
     foldr insertPkg Map.empty directDeps
 
 
-insertPkg :: Project.PkgInfo -> ExposedModules -> ExposedModules
-insertPkg info exposedModules =
+insertPkg :: Project.PkgInfo -> DepModules -> DepModules
+insertPkg info depModules =
   let
     home =
       ( Project.toPkgName info
@@ -84,7 +83,7 @@ insertPkg info exposedModules =
     insertModule modul dict =
       Map.insertWith (++) modul [home] dict
   in
-    foldr insertModule exposedModules (Project._pkg_exposed info)
+    foldr insertModule depModules (Project._pkg_exposed info)
 
 
 
@@ -170,18 +169,18 @@ checkCompilerVersion info =
   if C.isSatisfied (Project._pkg_elm_version info) Compiler.version then
     return ()
   else
-    Task.throw (error "TODO")
+    Task.throw (error "TODO checkCompilerVersion")
 
 
 checkDep :: ExactDeps -> Name -> Name -> C.Constraint -> Task.Task ()
 checkDep solution depName subDepName constraint =
   case Map.lookup subDepName solution of
     Nothing ->
-      Task.throw (error "TODO" depName subDepName)
+      Task.throw (error "TODO checkDep" depName subDepName)
 
     Just version ->
       if C.isSatisfied constraint version then
         return ()
 
       else
-        Task.throw (error "TODO" depName subDepName)
+        Task.throw (error "TODO checkDep" depName subDepName)

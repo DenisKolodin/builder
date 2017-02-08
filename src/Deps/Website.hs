@@ -42,7 +42,7 @@ getPkgInfo name version =
             return info
 
           _ ->
-            Task.throw (error "TODO")
+            Task.throw (error "TODO getPkgInfo")
 
 
 
