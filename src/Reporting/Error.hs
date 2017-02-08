@@ -5,20 +5,14 @@ module Reporting.Error
   , Hint(..)
   , toString
   , toStderr
-  , nearbyNames
   )
   where
 
-import Data.Function (on)
 import Data.Text (Text)
 import qualified Data.List as List
-import GHC.IO.Handle (hIsTerminalDevice)
-import System.IO (hPutStr, stderr)
-import qualified Text.EditDistance as Dist
 import Text.PrettyPrint.ANSI.Leijen
-  ( Doc, (<+>), (<>), align, displayS, displayIO, dullred
-  , dullyellow, fillSep, hardline, indent, plain, red
-  , renderPretty, text, underline, vcat
+  ( Doc, (<+>), align, dullred, dullyellow
+  , fillSep, indent, text, vcat
   )
 
 import qualified Elm.Assets as Assets
@@ -27,6 +21,8 @@ import qualified Elm.Package as Pkg
 
 import qualified Elm.Project.Constraint as C
 import qualified Reporting.Error.Assets as AssetsError
+import qualified Reporting.Error.Help as Help
+import Reporting.Error.Help (reflow, stack)
 
 
 
@@ -80,83 +76,68 @@ data Hint
 
 
 
--- NEARBY NAMES
+-- RENDERERS
 
 
-nearbyNames :: Pkg.Name -> [Pkg.Name] -> [Pkg.Name]
-nearbyNames package allPackages =
-  let
-    name =
-      Pkg.toString package
-
-    ratedNames =
-      map (\pkg -> (distance name (Pkg.toString pkg), pkg)) allPackages
-
-    sortedNames =
-      List.sortBy (compare `on` fst) ratedNames
-  in
-    map snd $ take 4 sortedNames
+toString :: Error -> String
+toString err =
+  Help.toString (toDoc err)
 
 
-distance :: String -> String -> Int
-distance x y =
-  Dist.restrictedDamerauLevenshteinDistance Dist.defaultEditCosts x y
+toStderr :: Error -> IO ()
+toStderr err =
+  Help.toStderr (toDoc err)
 
 
-
--- TO MESSAGE
-
-
-data Message =
-  Message
-    { _summary :: String
-    , _details :: [Doc]
-    }
-
-
-toMessage :: Error -> Message
-toMessage err =
+toDoc :: Error -> Doc
+toDoc err =
   case err of
+    Assets assetError ->
+      AssetsError.toDoc assetError
+
+    BadCompile file source errors ->
+      Help.makeErrorDoc "Bad compile" [text file, text "TODO"]
+
     BadElmVersion elmVersion isGreater elmConstraint ->
-        Message
-          ( "You are using Elm " ++ Pkg.versionToString elmVersion
-            ++ ", but this project is saying it needs a version in this range: "
-            ++ C.toString elmConstraint
-          )
-          ( map reflow $
-              if isGreater then
-                [ "This means this package has not been upgraded for the newer version of Elm yet.\
-                  \ Check out the upgrade docs for guidance on how to get things working again:\
-                  \ <https://github.com/elm-lang/elm-platform/tree/master/upgrade-docs>"
-                ]
-              else
-                [ "This means the package is written for a newer version of Elm. The best route\
-                  \ is to just download the new Elm version! <http://elm-lang.org/install>"
-                , "If you cannot upgrade for some reason, you can install different versions at\
-                  \ the same time with npm. I switch between versions by changing my PATH to\
-                  \ point at certain binaries, but you can do it however you want."
-                ]
-          )
+      Help.makeErrorDoc
+        ( "You are using Elm " ++ Pkg.versionToString elmVersion
+          ++ ", but this project is saying it needs a version in this range: "
+          ++ C.toString elmConstraint
+        )
+        ( map reflow $
+            if isGreater then
+              [ "This means this package has not been upgraded for the newer version of Elm yet.\
+                \ Check out the upgrade docs for guidance on how to get things working again:\
+                \ <https://github.com/elm-lang/elm-platform/tree/master/upgrade-docs>"
+              ]
+            else
+              [ "This means the package is written for a newer version of Elm. The best route\
+                \ is to just download the new Elm version! <http://elm-lang.org/install>"
+              , "If you cannot upgrade for some reason, you can install different versions at\
+                \ the same time with npm. I switch between versions by changing my PATH to\
+                \ point at certain binaries, but you can do it however you want."
+              ]
+        )
 
     SystemCallFailed problem ->
-      Message "A system call failed." [ text problem ]
+      Help.makeErrorDoc "A system call failed." [ text problem ]
 
     HttpRequestFailed url message ->
-      Message
+      Help.makeErrorDoc
         ( "The following HTTP request failed. <" ++ url ++ ">"
         )
         [ text message
         ]
 
     ZipDownloadFailed name version ->
-      Message
+      Help.makeErrorDoc
         ( "Problem when downloading the " ++ Pkg.toString name
           ++ " " ++ Pkg.versionToString version ++ " code."
         )
         []
 
     ConstraintsHaveNoSolution hints ->
-      Message "I cannot find a set of packages that works with your constraints." $
+      Help.makeErrorDoc "I cannot find a set of packages that works with your constraints." $
         case hints of
           [] ->
             [ reflow $
@@ -172,7 +153,7 @@ toMessage err =
             [ stack (map hintToBullet hints) ]
 
     AddTrickyConstraint name version constraint ->
-      Message
+      Help.makeErrorDoc
         ( "This change is too tricky for me. Your " ++ Assets.projectPath
           ++ " already lists the following dependency:"
         )
@@ -190,30 +171,30 @@ toMessage err =
         ]
 
     BadInstall version ->
-      Message
+      Help.makeErrorDoc
         ( "You specified a version number, but not a package! Version "
           ++ Pkg.versionToString version ++ " of what?"
         )
         []
 
     Undiffable ->
-      Message "This package has not been published, there is nothing to diff against!" []
+      Help.makeErrorDoc "This package has not been published, there is nothing to diff against!" []
 
     VersionInvalid ->
-      Message
+      Help.makeErrorDoc
         "Cannot publish a package with an invalid version. Use `elm-package bump` to\
         \ figure out what the next version should be, and be sure you commit any\
         \ changes and tag them appropriately."
         []
 
     VersionJustChanged ->
-      Message
+      Help.makeErrorDoc
         "Cannot publish a package with an invalid version. Be sure you commit any\
         \ necessary changes and tag them appropriately."
         []
 
     BadMetadata problems ->
-      Message
+      Help.makeErrorDoc
         ( "Some of the fields in " ++ Assets.projectPath ++ " have not been filled in yet:"
         )
         [ vcat (map text problems)
@@ -225,7 +206,7 @@ toMessage err =
         vsn =
           Pkg.versionToString version
       in
-        Message
+        Help.makeErrorDoc
           ( "Libraries must be tagged in git, but tag " ++ vsn ++ " was not found."
           )
           [ vcat $ map text $
@@ -238,7 +219,7 @@ toMessage err =
           ]
 
     AlreadyPublished vsn ->
-      Message
+      Help.makeErrorDoc
         ( "Version " ++ Pkg.versionToString vsn ++ " has already been published.\
           \ You cannot publish it again! Run the following command to see what\
           \ the new version should be:"
@@ -259,7 +240,7 @@ toMessage err =
             vsnStrings ->
               " to one of these:  "++ List.intercalate ", " vsnStrings
       in
-        Message
+        Help.makeErrorDoc
           ( "To compute a version bump, I need to start with a version that has\
             \ already been published. Your " ++ Assets.projectPath
             ++ " says I should start with version "
@@ -271,7 +252,7 @@ toMessage err =
           ]
 
     InvalidBump statedVersion latestVersion ->
-      Message
+      Help.makeErrorDoc
         ( "Your " ++ Assets.projectPath ++ " says the next version should be "
           ++ Pkg.versionToString statedVersion ++ ", but that is not valid\
           \ based on the previously published versions."
@@ -284,7 +265,7 @@ toMessage err =
         ]
 
     BadBump old new magnitude realNew realMagnitude ->
-      Message
+      Help.makeErrorDoc
         ( "Your " ++ Assets.projectPath ++ " says the next version should be "
           ++ Pkg.versionToString new ++ ", indicating a " ++ show magnitude
           ++ " change to the public API. This does not match the API diff given by:"
@@ -366,59 +347,3 @@ instead newName =
 hintToBullet :: Hint -> Doc
 hintToBullet hint =
   dullred (text "-->") <+> align (hintToDoc hint)
-
-
-
--- RENDERERS
-
-
-toStderr :: Error -> IO ()
-toStderr err =
-  do  isTerminal <- hIsTerminalDevice stderr
-      if isTerminal
-        then displayIO stderr (renderPretty 1 80 (toDoc err))
-        else hPutStr stderr (toString err)
-
-
-toString :: Error -> String
-toString err =
-  displayS (renderPretty 1 80 (plain (toDoc err))) ""
-
-
-toDoc :: Error -> Doc
-toDoc err =
-  let
-    (Message summary details) =
-      toMessage err
-
-    summaryDoc =
-      fillSep (errorStart : map text (words summary))
-  in
-    stack (summaryDoc : details)
-    <> hardline
-    <> hardline
-
-
-stack :: [Doc] -> Doc
-stack allDocs =
-  case allDocs of
-    [] ->
-      error "Do not use `stack` on empty lists."
-
-    doc : docs ->
-      List.foldl' verticalAppend doc docs
-
-
-verticalAppend :: Doc -> Doc -> Doc
-verticalAppend a b =
-  a <> hardline <> hardline <> b
-
-
-errorStart :: Doc
-errorStart =
-  red (underline (text "Error")) <> text ":"
-
-
-reflow :: String -> Doc
-reflow paragraph =
-  fillSep (map text (words paragraph))

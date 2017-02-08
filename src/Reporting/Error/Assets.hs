@@ -1,15 +1,22 @@
 {-# OPTIONS_GHC -Wall #-}
+{-# LANGUAGE OverloadedStrings #-}
 module Reporting.Error.Assets
   ( Error(..)
-  , ProjectError(..)
+  , toDoc
   )
   where
 
-
-import Data.Text (Text)
+import qualified Data.Aeson as Aeson
+import qualified Data.Text as Text
+import Text.PrettyPrint.ANSI.Leijen
+  ( Doc, (<+>), (<>), dullyellow, fillSep, green, indent, text, vcat )
 
 import qualified Elm.Compiler.Module as Module
 import qualified Elm.Package as Pkg
+
+import qualified Utils.Json as Json
+import qualified Reporting.Error.Help as Help
+import Reporting.Error.Help (reflow)
 
 
 
@@ -17,7 +24,7 @@ import qualified Elm.Package as Pkg
 
 
 data Error
-  = CorruptProject FilePath ProjectError
+  = CorruptProject FilePath (Maybe Json.Error)
   | CorruptDocumentation String
   | CorruptVersionCache Pkg.Name
   | PackageNotFound Pkg.Name [Pkg.Name]
@@ -39,64 +46,87 @@ data Error
 
 
 
--- PROJECT ERRORS
+-- TO DOC
 
 
-data ProjectError
-  = BadJson
-  | BadType
-  | Missing Text
-  | BadFlag Text
-  | BadLicense [Text]
-  | BadSummary
-  | BadAppDeps Text
-  | BadAppDepName Text Text
-  | BadPkgDeps Text
-  | BadPkgDepName Text Text
-  | BadExposed Text
-  | BadExposedName Text Text
-  | BadDir Text
-  | BadVersion (Maybe Text) Text
-  | BadConstraint (Maybe Text) Text
-  | BadRepo Text
+toDoc :: Error -> Doc
+toDoc err =
+  case err of
+    CorruptProject path maybeProblem ->
+      case maybeProblem of
+        Nothing ->
+          Help.makeErrorDoc
+            ("Looks like the JSON in " ++ path ++ " is messed up.")
+            [ reflow "Maybe a comma is missing? Or a closing } or ]?"
+            ]
 
+        Just jsonError ->
+          let
+            (location, json, expecting) =
+              getJsonErrorInfo jsonError "project"
+          in
+            Help.makeErrorDoc ("Something is wrong in your " ++ path ++ " file.") $
+              if location == "project" then
+                [ text "I was expecting" <+> green (text expecting) <> text "."
+                ]
 
-
-{-
-    CorruptJson _url ->
-      error "TODO"
-
-    CorruptProject path problem ->
-      Message
-        ( "Your " ++ path ++ " is invalid."
-        )
-        [ error "TODO" problem
-        ]
+              else
+                [ fillSep $
+                    text "I was expecting"
+                    : map (green . text) (words expecting)
+                    ++
+                      [ text "at"
+                      , dullyellow (text location)
+                      ]
+                ]
 
     CorruptDocumentation problem ->
-      Message
-        ( "I was able to produce documentation for your package, but it is not valid.\
-          \ My guess is that the elm-package and elm-make on your PATH are not from the\
-          \ same version of Elm, but it could be some other similarly crazy thing."
-        )
-        [ text problem
-        ]
+      Help.makeErrorDoc "CorruptDocumentation" [ text "TODO" ]
 
     CorruptVersionCache name ->
-      Message
-        ( "Your .elm/packages/ directory may be corrupted. I was led to believe\
-          \ that " ++ Pkg.toString name ++ " existed, but I could not find anything\
-          \ when I went to look up the published versions of this package."
-        )
-        []
-
+      Help.makeErrorDoc "CorruptVersionCache" [ text "TODO" ]
 
     PackageNotFound package suggestions ->
-      Message
-        ( "Could not find any packages named " ++ Pkg.toString package ++ "."
+      Help.makeErrorDoc
+        ( "Could not find any packages named " ++ Pkg.toString package
         )
-        [ text $ "Here are some packages that have similar names:"
+        [ text $ "Maybe you want one of these instead?"
         , indent 4 $ vcat $ map (text . Pkg.toString) suggestions
-        , text $ "Maybe you want one of those?"
         ]
--}
+
+    CorruptBinary path ->
+      Help.makeErrorDoc "CorruptBinary" [ text "TODO" ]
+
+    ModuleNotFound name maybeParent ->
+      Help.makeErrorDoc "ModuleNotFound" [ text "TODO" ]
+
+    ModuleDuplicates name parent local foreign ->
+      Help.makeErrorDoc "ModuleDuplicates" [ text "TODO" ]
+
+    ModuleNameMismatch path expectedName actualName ->
+      Help.makeErrorDoc "ModuleNameMismatch" [ text "TODO" ]
+
+    UnpublishablePorts path name ->
+      Help.makeErrorDoc "UnpublishablePorts" [ text "TODO" ]
+
+    UnpublishableEffects path name ->
+      Help.makeErrorDoc "UnpublishableEffects" [ text "TODO" ]
+
+
+getJsonErrorInfo :: Json.Error -> String -> (String, Aeson.Value, String)
+getJsonErrorInfo err location =
+  case err of
+    Json.Field field subErr ->
+      getJsonErrorInfo subErr $
+        if Text.isInfixOf "-" field then
+          location ++ "['" ++ Text.unpack field ++ "']"
+
+        else
+          location ++ "." ++ Text.unpack field
+
+    Json.Index index subErr ->
+      getJsonErrorInfo subErr $
+        location ++ "[" ++ show index ++ "]"
+
+    Json.Failure value expecting ->
+      (location, value, expecting)
