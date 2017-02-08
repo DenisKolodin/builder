@@ -34,12 +34,27 @@ Library
         src
 
     exposed-modules:
-        Elm.Assets
+        Elm.Assets,
         Elm.Project,
         Elm.Project.Constraint,
-        Elm.Project.Licenses
+        Elm.Project.Licenses,
+        File.Crawler,
+        File.IO,
+        Reporting.Error,
+        Reporting.Progress,
+        Reporting.Progress.Terminal,
+        Reporting.Task,
+        Stuff.Interfaces,
+        Stuff.Validate
 
     other-modules:
+        Deps.Explorer,
+        Deps.Website,
+        Reporting.Error.Assets,
+        Reporting.Error.Help,
+        Reporting.Progress.Bar,
+        Stuff.Paths,
+        Utils.Json
 
     Build-depends:
         aeson >= 0.11,
@@ -53,6 +68,7 @@ Library
         edit-distance,
         elm-compiler == 0.18,
         filepath >= 1 && < 2.0,
+        fsnotify >= 0.2.1,
         HTTP >= 4000.2.5 && < 4000.4,
         http-client >= 0.4.15 && < 0.5,
         http-client-tls >= 0.2 && < 0.3,
@@ -60,6 +76,7 @@ Library
         mtl >= 2.2.1 && < 3,
         network >= 2.4 && < 2.7,
         parallel-io,
+        scientific,
         text,
         time,
         unordered-containers,
