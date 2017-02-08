@@ -1,6 +1,11 @@
 {-# OPTIONS_GHC -Wall #-}
 {-# LANGUAGE OverloadedStrings #-}
-module File.Crawler where
+module File.Crawler
+  ( Graph(..), Node(..)
+  , dfsFromFiles, dfsFromProject
+  , Permissions(..)
+  )
+  where
 
 import Control.Monad.Except (liftIO)
 import qualified Data.Map as Map
@@ -47,7 +52,7 @@ data Node =
 data Env =
   Env
     { _srcDirs :: [FilePath]
-    , _depModules :: Stuff.ExposedModules
+    , _depModules :: Stuff.DepModules
     , _permissions :: Permissions
     , _pkgName :: Maybe Name
     , _native :: Bool
@@ -64,50 +69,65 @@ initEnv :: FilePath -> Project -> Stuff.DepsInfo -> Permissions -> Env
 initEnv root project depsInfo permissions =
   Env
     [ root </> Project.toSourceDir project ]
-    (Stuff.getExposedModules depsInfo)
+    (Stuff.getDepModules project depsInfo)
     permissions
     (Project.toName project)
     (Project.toNative project)
 
 
 
-{-- GENERIC CRAWLER
+-- GENERIC CRAWLER
 
 
 dfsFromFiles
   :: FilePath
-  -> Solution.Solution
-  -> Desc.Description
+  -> Project
+  -> Stuff.DepsInfo
   -> Permissions
   -> [FilePath]
   -> Task.Task ([Module.Raw], Graph)
-dfsFromFiles root solution desc permissions filePaths =
-  do  env <- initEnv root desc solution permissions
+dfsFromFiles root project depsInfo permissions filePaths =
+  do  let env = initEnv root project depsInfo permissions
 
-      info <- mapM (readDeps env Nothing) filePaths
-      let names = map fst info
-      let unvisited = concatMap (snd . snd) info
-      let pkgData = Map.fromList (map (second fst) info)
-      let initialGraph = Graph pkgData Map.empty Map.empty
+      info <- traverse (readDeps env Nothing) filePaths
 
-      summary <- dfs env unvisited initialGraph
+      let step (name, node, nexts) (names, unvisited, nodes) =
+            ( name : names
+            , nexts ++ unvisited
+            , Map.insert name node nodes
+            )
 
-      return (names, summary)
+      let (names, unvisited, nodes) =
+            foldr step ([], [], Map.empty) info
+
+      let initialGraph = Graph nodes Map.empty Map.empty
+
+      graph <- dfs env unvisited initialGraph
+
+      return (names, graph)
 
 
-dfsFromExposedModules
+dfsFromProject
   :: FilePath
-  -> Solution.Solution
-  -> Desc.Description
+  -> Project
+  -> Stuff.DepsInfo
   -> Permissions
   -> Task.Task Graph
-dfsFromExposedModules root solution desc permissions =
-  do  env <- initEnv root desc solution permissions
-      let unvisited = map (Unvisited Nothing) (Desc.exposed desc)
-      let summary = Graph Map.empty Map.empty Map.empty
-      dfs env unvisited summary
+dfsFromProject root project depsInfo permissions =
+  let
+    unvisited =
+      map (Unvisited Nothing) (Project.toRoots project)
 
---}
+    env =
+      initEnv root project depsInfo permissions
+
+    initialGraph =
+      Graph Map.empty Map.empty Map.empty
+  in
+    dfs env unvisited initialGraph
+
+
+
 
 
 
