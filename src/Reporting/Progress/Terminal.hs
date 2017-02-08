@@ -15,6 +15,7 @@ import qualified Elm.Package as Pkg
 import Elm.Package (Name, Version)
 
 import Reporting.Progress ( Progress(..), Outcome(..) )
+import qualified Reporting.Progress as Progress
 import qualified Reporting.Progress.Bar as Bar
 
 
@@ -22,7 +23,7 @@ import qualified Reporting.Progress.Bar as Bar
 -- CREATE
 
 
-create :: IO (Progress -> IO ())
+create :: IO Progress.Reporter
 create =
   do  chan <- newChan
 
