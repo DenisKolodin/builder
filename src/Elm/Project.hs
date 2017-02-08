@@ -4,15 +4,15 @@
 module Elm.Project
   ( Project(..)
   , AppInfo(..)
-  , PkgInfo(..), Repo(..)
+  , PkgInfo(..)
   , Bundles(..)
   , ExactDeps
   , toName, toPkgName, toPkgVersion
   , toSourceDir, toNative
   , matchesCompilerVersion
   , toSolution, toDirectDeps
+  , toRoots
   , parse
-  , forcePkg
   , path, unsafeRead, write
   )
   where
@@ -22,13 +22,12 @@ import Data.Text (Text)
 import GHC.Generics (Generic)
 import Prelude hiding (read)
 import Control.Monad.Trans (liftIO)
-import qualified Data.Aeson as Json
+import qualified Data.Aeson as Aeson
 import qualified Data.ByteString.Lazy.Char8 as BS
-import qualified Data.HashMap.Strict as HashMap
+import qualified Data.HashMap.Lazy as HashMap
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 import qualified Data.Text as Text
-import qualified Data.Vector as Vector
 
 import qualified Elm.Compiler as Compiler
 import qualified Elm.Compiler.Module as Module
@@ -39,8 +38,8 @@ import qualified Elm.Project.Constraint as C
 import qualified Elm.Project.Licenses as Licenses
 import qualified Reporting.Error as Error
 import qualified Reporting.Error.Assets as E
-import Reporting.Error.Assets (ProjectError)
 import qualified Reporting.Task as Task
+import qualified Utils.Json as Json
 
 
 
@@ -53,15 +52,28 @@ data Project
   deriving (Eq, Generic)
 
 
+
+-- APP INFO
+
+
 data AppInfo =
   AppInfo
     { _app_elm_version :: Pkg.Version
-    , _app_dependencies :: ExactDeps
-    , _app_test_deps :: ExactDeps
-    , _app_exact_deps :: ExactDeps
+    , _app_pages :: [Module.Raw]
+    , _app_bundles :: Bundles
     , _app_source_dir :: FilePath
     , _app_output_dir :: FilePath
-    , _app_bundles :: Bundles
+    , _app_deps :: TransitiveDeps
+    }
+    deriving (Eq, Generic)
+
+
+data TransitiveDeps =
+  TransitiveDeps
+    { _direct :: ExactDeps
+    , _trans :: ExactDeps
+    , _test_direct :: ExactDeps
+    , _test_trans :: ExactDeps
     }
     deriving (Eq, Generic)
 
@@ -70,13 +82,17 @@ type ExactDeps =
   Map.Map Pkg.Name Pkg.Version
 
 
-data Bundles = Bundles
+data Bundles = Bundles [[Pkg.Name]]
   deriving (Eq, Generic)
+
+
+
+-- PKG INFO
 
 
 data PkgInfo =
   PkgInfo
-    { _pkg_repo :: Repo
+    { _pkg_repo :: Pkg.Name
     , _pkg_summary :: Text
     , _pkg_license :: Licenses.License
     , _pkg_version :: Pkg.Version
@@ -84,7 +100,7 @@ data PkgInfo =
     , _pkg_exposed :: [Module.Raw]
     , _pkg_dependencies :: Constraints
     , _pkg_test_deps :: Constraints
-    , _pkg_exact_deps :: ExactDeps
+    , _pkg_transitive_deps :: TransitiveDeps
     , _pkg_elm_version :: C.Constraint
     , _pkg_natives :: Bool
     , _pkg_effects :: Bool
@@ -104,18 +120,11 @@ instance Binary Project
 instance Binary AppInfo
 instance Binary PkgInfo
 instance Binary Bundles
-instance Binary Repo
+instance Binary TransitiveDeps
 
 
 
 -- REPO
-
-
-data Repo
-  = GitHub Text Text
-  | GitLab Text Text
-  | BitBucket Text Text
-  deriving (Eq, Generic)
 
 
 toName :: Project -> Maybe Pkg.Name
@@ -125,15 +134,7 @@ toName project =
 
 toPkgName :: PkgInfo -> Pkg.Name
 toPkgName info =
-  case _pkg_repo info of
-    GitHub user project ->
-      Pkg.Name user project
-
-    GitLab user project ->
-      Pkg.Name user project
-
-    BitBucket user project ->
-      Pkg.Name user project
+  _pkg_repo info
 
 
 toPkgVersion :: PkgInfo -> Pkg.Version
@@ -175,294 +176,227 @@ matchesCompilerVersion project =
       C.isSatisfied (_pkg_elm_version info) Compiler.version
 
 
--- TODO update deps to match the Elm JSON decoders for this
 toSolution :: Project -> ExactDeps
 toSolution project =
-  case project of
-    App info ->
-      Map.unions
-        [ _app_dependencies info
-        , _app_test_deps info
-        , _app_exact_deps info
-        ]
+  toSolutionHelp $ destruct _app_deps _pkg_transitive_deps project
 
-    Pkg info ->
-      _pkg_exact_deps info
+
+toSolutionHelp :: TransitiveDeps -> ExactDeps
+toSolutionHelp (TransitiveDeps a b c d) =
+  Map.unions [a,b,c,d]
 
 
 toDirectDeps :: Project -> Set.Set Pkg.Name
 toDirectDeps project =
-  case project of
-    App info ->
-      Set.unions
-        [ Map.keysSet (_app_dependencies info)
-        , Map.keysSet (_app_test_deps info)
-        ]
+  toDirectDepsHelp $ destruct _app_deps _pkg_transitive_deps project
 
-    Pkg info ->
-      Set.unions
-        [ Map.keysSet (_pkg_dependencies info)
-        , Map.keysSet (_pkg_test_deps info)
-        ]
+
+toDirectDepsHelp :: TransitiveDeps -> Set.Set Pkg.Name
+toDirectDepsHelp (TransitiveDeps a b _ _) =
+  Map.keysSet (Map.union a b)
+
+
+toRoots :: Project -> [Module.Raw]
+toRoots project =
+  destruct _app_pages _pkg_exposed project
 
 
 
 -- JSON to PROJECT
 
 
-parse :: BS.ByteString -> Either ProjectError Project
+parse :: BS.ByteString -> Either (Maybe Json.Error) Project
 parse bytestring =
-  do  object <- onError E.BadJson (Json.eitherDecode bytestring)
-      case HashMap.lookup "type" object of
-        Just "application" ->
-          App <$> parseAppInfo object
+  case Aeson.eitherDecode bytestring of
+    Left _ ->
+      Left Nothing
 
-        Just "package" ->
-          Pkg <$> parsePkgInfo object
+    Right value ->
+      case Json.decode projectDecoder value of
+        Left err ->
+          Left (Just err)
+
+        Right project ->
+          Right project
+
+
+projectDecoder :: Json.Decoder Project
+projectDecoder =
+  do  tipe <- Json.field "type" Json.text
+      case tipe of
+        "application" ->
+          Json.map App appDecoder
+
+        "package" ->
+          Json.map Pkg pkgDecoder
 
         _ ->
-          Left $ E.BadType
+          Json.fail "\"application\" or \"package\""
 
 
-parseAppInfo :: Json.Object -> Either ProjectError AppInfo
-parseAppInfo obj =
-  do  a <- get obj "elm-version" (checkVersion Nothing)
-      b <- get obj "dependencies" checkAppDeps
-      c <- get obj "test-deps" checkAppDeps
-      d <- get obj "exact-deps" checkAppDeps
-      e <- get obj "source-directory" checkDir
-      f <- get obj "output-directory" checkDir
-      g <- get obj "bundles" checkBundles
-      return (AppInfo a b c d e f g)
+
+-- APP JSON
 
 
-parsePkgInfo :: Json.Object -> Either ProjectError PkgInfo
-parsePkgInfo obj =
-  do  a <- get obj "repo" checkRepo
-      b <- get obj "summary" checkSummary
-      c <- get obj "license" checkLicense
-      d <- get obj "version" (checkVersion Nothing)
-      e <- get obj "source-directory" checkDir
-      f <- get obj "exposed-modules" checkExposed
-      g <- get obj "dependencies" checkPkgDeps
-      h <- get obj "test-deps" checkPkgDeps
-      i <- get obj "exact-deps" checkAppDeps
-      j <- get obj "elm-version" (checkConstraint Nothing)
-      k <- getFlag obj "native-modules"
-      l <- getFlag obj "effect-modules"
-      return (PkgInfo a b c d e f g h i j k l)
+appDecoder :: Json.Decoder AppInfo
+appDecoder =
+  AppInfo
+    <$> Json.field "elm-version" versionDecoder
+    <*> Json.field "pages" pagesDecoder
+    <*> Json.field "bundles" bundlesDecoder
+    <*> Json.field "source-directory" dirDecoder
+    <*> Json.field "output-directory" dirDecoder
+    <*> appDepsDecoder
+
+
+appDepsDecoder :: Json.Decoder TransitiveDeps
+appDepsDecoder =
+  TransitiveDeps
+    <$> Json.field "dependencies" (depsDecoder versionDecoder)
+    <*> Json.field "test-dependencies" (depsDecoder versionDecoder)
+    <*> Json.at ["do-not-edit-this-by-hand", "transitive-dependencies"] (depsDecoder versionDecoder)
+    <*> Json.at ["do-not-edit-this-by-hand", "transitive-test-dependencies"] (depsDecoder versionDecoder)
+
+
+
+-- PACKAGE JSON
+
+
+pkgDecoder :: Json.Decoder PkgInfo
+pkgDecoder =
+  PkgInfo
+    <$> Json.field "repo" pkgNameDecoder
+    <*> Json.field "summary" summaryDecoder
+    <*> Json.field "license" licenseDecoder
+    <*> Json.field "version" versionDecoder
+    <*> Json.field "source-directory" dirDecoder
+    <*> Json.field "exposed-modules" exposedDecoder
+    <*> Json.field "dependencies" (depsDecoder constraintDecoder)
+    <*> Json.field "test-deps" (depsDecoder constraintDecoder)
+    <*> Json.field "do-not-edit-this-by-hand" pkgTransitiveDepsDecoder
+    <*> Json.field "elm-version" constraintDecoder
+    <*> flag "native-modules"
+    <*> flag "effect-modules"
+
+
+flag :: Text -> Json.Decoder Bool
+flag name =
+  maybe False id <$>
+    Json.maybe (Json.field name Json.bool)
+
+
+pkgTransitiveDepsDecoder :: Json.Decoder TransitiveDeps
+pkgTransitiveDepsDecoder =
+  TransitiveDeps
+    <$> Json.field "dependencies" (depsDecoder versionDecoder)
+    <*> Json.field "test-dependencies" (depsDecoder versionDecoder)
+    <*> Json.field "transitive-dependencies" (depsDecoder versionDecoder)
+    <*> Json.field "transitive-test-dependencies" (depsDecoder versionDecoder)
 
 
 
 -- JSON HELPERS
 
 
-type Field = Text
+versionDecoder :: Json.Decoder Pkg.Version
+versionDecoder =
+  do  txt <- Json.text
+      either fail return (Pkg.versionFromText txt)
 
 
-get :: Json.Object -> Field -> Checker a -> Either ProjectError a
-get obj field checker =
-  case HashMap.lookup field obj of
-    Just value ->
-      checker field value
+constraintDecoder :: Json.Decoder C.Constraint
+constraintDecoder =
+  do  txt <- Json.text
+      case C.fromText txt of
+        Just constraint ->
+          Json.succeed constraint
 
-    Nothing ->
-      Left $ E.Missing field
-
-
-getFlag :: Json.Object -> Field -> Either ProjectError Bool
-getFlag obj field =
-  case HashMap.lookup field obj of
-    Nothing ->
-      Right False
-
-    Just (Json.Bool bool) ->
-      Right bool
-
-    _ ->
-      Left $ E.BadFlag field
+        Nothing ->
+          Json.fail "a valid constraint, like \"1.0.0 <= v < 2.0.0\""
 
 
-onError :: y -> Either x a -> Either y a
-onError err result =
-  mapError (const err) result
+depsDecoder :: Json.Decoder a -> Json.Decoder (Map.Map Pkg.Name a)
+depsDecoder decoder =
+  do  hashMap <- Json.dict decoder
+      keyValues <- traverse validateKey (HashMap.toList hashMap)
+      return (Map.fromList keyValues)
 
 
-mapError :: (x -> y) -> Either x a -> Either y a
-mapError func result =
-  case result of
-    Right a ->
-      Right a
+validateKey :: (Text, a) -> Json.Decoder (Pkg.Name, a)
+validateKey (key, value) =
+  case Pkg.fromText key of
+    Left _ ->
+      Json.fail "keys that are valid project names"
 
-    Left err ->
-      Left (func err)
-
-
-jsonToString :: Json.Value -> ProjectError -> Either ProjectError String
-jsonToString value err =
-  Text.unpack <$> jsonToText value err
+    Right name ->
+      Json.succeed (name, value)
 
 
-jsonToText :: Json.Value -> ProjectError -> Either ProjectError Text
-jsonToText value err =
-  case value of
-    Json.String text ->
-      Right text
+dirDecoder :: Json.Decoder FilePath
+dirDecoder =
+  do  maybeText <- Json.maybe Json.text
+      case maybeText of
+        Nothing ->
+          Json.fail "a file path"
 
-    _ ->
-      Left err
-
-
-getObject :: Json.Value -> ProjectError -> Either ProjectError Json.Object
-getObject value err =
-  case value of
-    Json.Object object ->
-      Right object
-
-    _ ->
-      Left err
+        Just txt ->
+          Json.succeed (Text.unpack txt)
 
 
-
--- CHECKERS
-
-
-type Checker a =
-  Field -> Json.Value -> Either ProjectError a
+pagesDecoder :: Json.Decoder [Module.Raw]
+pagesDecoder =
+  Json.list moduleNameDecoder
 
 
-checkVersion :: Maybe Text -> Checker Pkg.Version
-checkVersion context field value =
-  do  let err = E.BadVersion context field
-      string <- jsonToString value err
-      onError err (Pkg.versionFromString string)
-
-
-checkConstraint :: Maybe Text -> Checker C.Constraint
-checkConstraint context field value =
-  do  let err = E.BadConstraint context field
-      string <- jsonToString value err
-      maybe (Left err) Right (C.fromString string)
-
-
-checkAppDeps :: Checker ExactDeps
-checkAppDeps field value =
-  do  hashMap <- getObject value (E.BadAppDeps field)
-      let deps = HashMap.toList hashMap
-      Map.fromList <$> traverse (checkAppDepsHelp field) deps
-
-
-checkAppDepsHelp :: Field -> (Text.Text, Json.Value) -> Either ProjectError (Pkg.Name, Pkg.Version)
-checkAppDepsHelp field (subField, rawVersion) =
-  do  let err = E.BadAppDepName field subField
-      name <- onError err (Pkg.fromString (Text.unpack subField))
-      version <- checkVersion (Just field) subField rawVersion
-      return (name, version)
-
-
-checkPkgDeps :: Checker Constraints
-checkPkgDeps field value =
-  do  hashMap <- getObject value (E.BadPkgDeps field)
-      let deps = HashMap.toList hashMap
-      Map.fromList <$> traverse (checkConstraintsHelp field) deps
-
-
-checkConstraintsHelp :: Field -> (Text.Text, Json.Value) -> Either ProjectError (Pkg.Name, C.Constraint)
-checkConstraintsHelp field (text, rawConstraint) =
-  do  let err = E.BadPkgDepName field text
-      name <- onError err (Pkg.fromString (Text.unpack text))
-      constraint <- checkConstraint (Just field) text rawConstraint
-      return (name, constraint)
-
-
-checkDir :: Checker FilePath
-checkDir field value =
-  jsonToString value (E.BadDir field)
-
-
-checkSummary :: Checker Text
-checkSummary _field value =
-  do  summary <- jsonToText value E.BadSummary
+summaryDecoder :: Json.Decoder Text
+summaryDecoder =
+  do  summary <- Json.text
       if Text.length summary < 80
-        then Right summary
-        else Left E.BadSummary
+        then Json.succeed summary
+        else Json.fail "a summary less than 80 characters long"
 
 
-checkLicense :: Checker Licenses.License
-checkLicense _field value =
-  do  license <- jsonToText value (E.BadLicense [])
-      mapError E.BadLicense (Licenses.check license)
+licenseDecoder :: Json.Decoder Licenses.License
+licenseDecoder =
+  do  txt <- Json.text
+      case Licenses.check txt of
+        Left suggestions ->
+          error "TODO license" suggestions
+
+        Right license ->
+          Json.succeed license
 
 
-checkRepo :: Checker Repo
-checkRepo field value =
-  do  let err = E.BadRepo field
-      text <- jsonToText value err
-      case Text.splitOn "/" text of
-        [host, author, project] ->
-          case host of
-            "github.com" ->
-              GitHub author <$> checkProject field project
+pkgNameDecoder :: Json.Decoder Pkg.Name
+pkgNameDecoder =
+  do  txt <- Json.text
+      case Pkg.fromText txt of
+        Left _ ->
+          Json.fail "a valid project name"
 
-            "gitlab.com" ->
-              GitLab author <$> checkProject field project
-
-            "bitbucket.com" ->
-              BitBucket author <$> checkProject field project
-
-            _ ->
-              Left err
-
-        _ ->
-          Left err
+        Right name ->
+          Json.succeed name
 
 
-checkProject :: Field -> Text -> Either ProjectError Text
-checkProject _field _rawProjectName =
-  error "TODO - make sure it is a valid project name / probably share with Elm.Package"
+bundlesDecoder :: Json.Decoder Bundles
+bundlesDecoder =
+  Bundles <$> Json.list (Json.list pkgNameDecoder)
 
 
-checkBundles :: Checker Bundles
-checkBundles _field _value =
-  error "TODO"
+exposedDecoder :: Json.Decoder [Module.Raw]
+exposedDecoder =
+  Json.list moduleNameDecoder
 
 
-checkExposed :: Checker [Module.Raw]
-checkExposed field value =
-  case value of
-    Json.Array vector ->
-      do  let getName entry = jsonToText entry (E.BadExposed field)
-          nameVector <- traverse getName vector
-          let names = Vector.toList nameVector
-          mapError (E.BadExposedName field) $
-            traverse getModuleName names
+moduleNameDecoder :: Json.Decoder Module.Raw
+moduleNameDecoder =
+  do  txt <- Json.text
+      case Module.nameFromText txt of
+        Nothing ->
+          Json.fail "a module name like \"Json.Decode\""
 
-    _ ->
-      Left $ E.BadExposed field
-
-
-getModuleName :: Text -> Either Text Module.Raw
-getModuleName text =
-  case Module.nameFromString (Text.unpack text) of
-    Just name ->
-      Right name
-
-    Nothing ->
-      Left text
-
-
-
--- CASTING PROJECTS
-
-
-forcePkg :: Project -> Task.Task PkgInfo
-forcePkg project =
-  case project of
-    App _ ->
-      Task.throw (error "TODO")
-
-    Pkg info ->
-      return info
+        Just name ->
+          Json.succeed name
 
 
 
@@ -500,5 +434,5 @@ write filePath project =
 
 projectToString :: Project -> String
 projectToString _project =
-  error "TODO"
+  error "TODO projectToString"
 
