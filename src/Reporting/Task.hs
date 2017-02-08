@@ -131,7 +131,7 @@ interleave tasks =
 
 domain :: String
 domain =
-  "http://package.elm-lang.org"
+  "http://localhost:8008"
 
 
 makeUrl :: String -> [(String,String)] -> String
