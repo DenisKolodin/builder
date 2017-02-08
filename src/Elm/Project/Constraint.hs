@@ -1,9 +1,11 @@
 {-# OPTIONS_GHC -Wall #-}
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE OverloadedStrings #-}
 module Elm.Project.Constraint
   ( Constraint
-  , fromString
+  , fromText
   , toString
+  , toText
   , untilNextMajor
   , untilNextMinor
   , expand
@@ -18,6 +20,7 @@ import Data.Binary (Binary)
 import GHC.Generics (Generic)
 import qualified Data.Aeson as Json
 import qualified Data.Text as Text
+import Data.Text (Text)
 
 import qualified Elm.Package as Package
 import qualified Elm.Compiler as Compiler
@@ -122,61 +125,63 @@ check constraint version =
 
 toString :: Constraint -> String
 toString constraint =
+  Text.unpack (toText constraint)
+
+
+toText :: Constraint -> Text
+toText constraint =
   case constraint of
     Range lower lowerOp upperOp upper ->
-      unwords
-        [ Package.versionToString lower
-        , opToString lowerOp
+      Text.intercalate " "
+        [ Package.versionToText lower
+        , opToText lowerOp
         , "v"
-        , opToString upperOp
-        , Package.versionToString upper
+        , opToText upperOp
+        , Package.versionToText upper
         ]
 
 
-opToString :: Op -> String
-opToString op =
+opToText :: Op -> Text
+opToText op =
   case op of
-    Less -> "<"
-    LessOrEqual -> "<="
+    Less ->
+      "<"
+
+    LessOrEqual ->
+      "<="
 
 
-fromString :: String -> Maybe Constraint
-fromString str =
-  do  let (lowerString, rest) = break (==' ') str
-      lower <- versionFromString lowerString
-      (lowerOp, rest1) <- takeOp (eatSpace rest)
-      rest2 <- eatV (eatSpace rest1)
-      (upperOp, rest3) <- takeOp (eatSpace rest2)
-      upper <- versionFromString (eatSpace rest3)
-      return (Range lower lowerOp upperOp upper)
+fromText :: Text -> Maybe Constraint
+fromText text =
+  case Text.splitOn " " text of
+    [lower, lowerOp, "v", upperOp, upper] ->
+      Range
+        <$> versionFromText lower
+        <*> opFromText lowerOp
+        <*> opFromText upperOp
+        <*> versionFromText upper
+
+    _ ->
+      Nothing
 
 
-eatSpace :: String -> String
-eatSpace str =
-  case str of
-    ' ' : rest -> rest
-    _ -> str
+versionFromText :: Text -> Maybe Package.Version
+versionFromText text =
+  either (const Nothing) Just $
+    Package.versionFromText text
 
 
-versionFromString :: String -> Maybe Package.Version
-versionFromString =
-    either (const Nothing) Just . Package.versionFromString
+opFromText :: Text -> Maybe Op
+opFromText text =
+  case text of
+    "<=" ->
+      Just LessOrEqual
 
+    "<" ->
+      Just Less
 
-takeOp :: String -> Maybe (Op, String)
-takeOp str =
-  case str of
-    '<' : '=' : rest -> Just (LessOrEqual, rest)
-    '<' : rest -> Just (Less, rest)
-    _ -> Nothing
-
-
-eatV :: String -> Maybe String
-eatV str =
-  case str of
-    'v' : rest -> Just rest
-    _ -> Nothing
-
+    _ ->
+      Nothing
 
 
 
@@ -184,22 +189,21 @@ eatV str =
 
 
 instance Json.ToJSON Constraint where
-    toJSON constraint =
-        Json.toJSON (toString constraint)
+  toJSON constraint =
+    Json.String (toText constraint)
 
 
 instance Json.FromJSON Constraint where
-    parseJSON (Json.String text) =
-        let rawConstraint = Text.unpack text in
-        case fromString rawConstraint of
-          Just constraint ->
-              return constraint
+  parseJSON (Json.String text) =
+    case fromText text of
+      Just constraint ->
+        return constraint
 
-          Nothing ->
-              fail $ errorMessage Nothing rawConstraint
+      Nothing ->
+        fail $ errorMessage Nothing (Text.unpack text)
 
-    parseJSON _ =
-        fail "constraint must be a string that looks something like \"1.2.1 <= v < 2.0.0\"."
+  parseJSON _ =
+    fail "constraint must be a string that looks something like \"1.2.1 <= v < 2.0.0\"."
 
 
 errorMessage :: Maybe String -> String -> String
