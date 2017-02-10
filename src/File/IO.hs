@@ -40,12 +40,12 @@ readBinary path =
       if not exists
         then throwCorruptBinary path
         else
-          do  bits <- liftIO (LBS.readFile path)
-              case Binary.decodeOrFail bits of
+          do  result <- liftIO (Binary.decodeFileOrFail path)
+              case result of
                 Left _ ->
                   throwCorruptBinary path
 
-                Right (_, _, value) ->
+                Right value ->
                   return value
 
 
