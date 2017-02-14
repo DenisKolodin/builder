@@ -23,7 +23,7 @@ import GHC.Generics (Generic)
 import Prelude hiding (read)
 import Control.Monad.Trans (liftIO)
 import qualified Data.Aeson as Aeson
-import qualified Data.ByteString.Lazy.Char8 as BS
+import qualified Data.ByteString.Lazy as BS
 import qualified Data.HashMap.Lazy as HashMap
 import qualified Data.Map as Map
 import qualified Data.Set as Set
@@ -92,11 +92,10 @@ data Bundles = Bundles [[Pkg.Name]]
 
 data PkgInfo =
   PkgInfo
-    { _pkg_repo :: Pkg.Name
+    { _pkg_name :: Pkg.Name
     , _pkg_summary :: Text
     , _pkg_license :: Licenses.License
     , _pkg_version :: Pkg.Version
-    , _pkg_source_dir :: FilePath
     , _pkg_exposed :: [Module.Raw]
     , _pkg_dependencies :: Constraints
     , _pkg_test_deps :: Constraints
@@ -134,7 +133,7 @@ toName project =
 
 toPkgName :: PkgInfo -> Pkg.Name
 toPkgName info =
-  _pkg_repo info
+  _pkg_name info
 
 
 toPkgVersion :: PkgInfo -> Pkg.Version
@@ -148,7 +147,7 @@ toPkgVersion info =
 
 toSourceDir :: Project -> FilePath
 toSourceDir project =
-  destruct _app_source_dir _pkg_source_dir project
+  destruct _app_source_dir (const "src") project
 
 
 toNative :: Project -> Bool
@@ -265,14 +264,13 @@ appDepsDecoder =
 pkgDecoder :: Json.Decoder PkgInfo
 pkgDecoder =
   PkgInfo
-    <$> Json.field "repo" pkgNameDecoder
+    <$> Json.field "name" pkgNameDecoder
     <*> Json.field "summary" summaryDecoder
     <*> Json.field "license" licenseDecoder
     <*> Json.field "version" versionDecoder
-    <*> Json.field "source-directory" dirDecoder
     <*> Json.field "exposed-modules" exposedDecoder
     <*> Json.field "dependencies" (depsDecoder constraintDecoder)
-    <*> Json.field "test-deps" (depsDecoder constraintDecoder)
+    <*> Json.field "test-dependencies" (depsDecoder constraintDecoder)
     <*> Json.field "do-not-edit-this-by-hand" pkgTransitiveDepsDecoder
     <*> Json.field "elm-version" constraintDecoder
     <*> flag "native-modules"
