@@ -13,7 +13,6 @@ module Elm.Project.Constraint
   , expand
   , isSatisfied
   , check
-  , errorMessage
   )
   where
 
@@ -222,27 +221,11 @@ instance Json.ToJSON Constraint where
 
 
 instance Json.FromJSON Constraint where
-  parseJSON (Json.String text) =
-    case fromText text of
-      Just constraint ->
-        return constraint
+  parseJSON =
+    Json.withText "Constraint" $ \text ->
+      case fromText text of
+        Just constraint ->
+          return constraint
 
-      Nothing ->
-        fail $ errorMessage Nothing (Text.unpack text)
-
-  parseJSON _ =
-    fail "constraint must be a string that looks something like \"1.2.1 <= v < 2.0.0\"."
-
-
-errorMessage :: Maybe String -> String -> String
-errorMessage maybeContext rawConstraint =
-  unlines
-    [ "Ran into invalid constraint \"" ++ rawConstraint ++ "\"" ++ maybe "" (" for " ++) maybeContext
-    , ""
-    , "It should look something like \"1.2.1 <= v < 2.0.0\", with no extra or missing"
-    , "spaces. The middle letter needs to be a 'v' as well."
-    , ""
-    , "Upper and lower bounds are required so that bounds represent the maximum range"
-    , "known to work. You do not want to promise users your library will work with"
-    , "4.0.0 that version has not been tested!"
-    ]
+        Nothing ->
+          fail "bad constraint, need something like \"1.2.1 <= v < 2.0.0\""
