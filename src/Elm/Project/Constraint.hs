@@ -6,6 +6,7 @@ module Elm.Project.Constraint
   , fromText
   , toString
   , toText
+  , intersect
   , untilNextMajor
   , untilNextMinor
   , expand
@@ -44,6 +45,31 @@ data Op
 
 instance Binary Constraint
 instance Binary Op
+
+
+
+-- INTERSECT
+
+
+intersect :: Constraint -> Constraint -> Maybe Constraint
+intersect (Range lo lop hop hi) (Range lo_ lop_ hop_ hi_) =
+  let
+    (newLo, newLop) =
+      case compare lo lo_ of
+        LT -> (lo_, lop_)
+        EQ -> (lo, if elem Less [lop,lop_] then Less else LessOrEqual)
+        GT -> (lo, lop)
+
+    (newHi, newHop) =
+      case compare hi hi_ of
+        LT -> (hi, hop)
+        EQ -> (hi, if elem Less [hop, hop_] then Less else LessOrEqual)
+        GT -> (hi_, hop_)
+  in
+    if newLo <= newHi then
+      Just (Range newLo newLop newHop newHi)
+    else
+      Nothing
 
 
 
