@@ -18,6 +18,7 @@ module Elm.Project.Constraint
 
 import Data.Binary (Binary)
 import GHC.Generics (Generic)
+import Control.Monad (guard)
 import qualified Data.Aeson as Json
 import qualified Data.Text as Text
 import Data.Text (Text)
@@ -155,11 +156,12 @@ fromText :: Text -> Maybe Constraint
 fromText text =
   case Text.splitOn " " text of
     [lower, lowerOp, "v", upperOp, upper] ->
-      Range
-        <$> versionFromText lower
-        <*> opFromText lowerOp
-        <*> opFromText upperOp
-        <*> versionFromText upper
+      do  lo <- versionFromText lower
+          lop <- opFromText lowerOp
+          hop <- opFromText upperOp
+          hi <- versionFromText upper
+          guard (lo <= hi)
+          return (Range lo lop hop hi)
 
     _ ->
       Nothing
