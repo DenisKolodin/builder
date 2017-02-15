@@ -6,13 +6,14 @@ module Elm.Project.Constraint
   , fromText
   , toString
   , toText
+  , satisfies
+  , check
   , intersect
-  , defaultElmVersion
+  , goodElm
+  , defaultElm
   , untilNextMajor
   , untilNextMinor
   , expand
-  , isSatisfied
-  , check
   )
   where
 
@@ -116,8 +117,8 @@ opFromText text =
 -- IS SATISFIED
 
 
-isSatisfied :: Constraint -> Package.Version -> Bool
-isSatisfied constraint version =
+satisfies :: Constraint -> Package.Version -> Bool
+satisfies constraint version =
   case constraint of
     Range lower lowerOp upperOp upper ->
         isLess lowerOp lower version
@@ -178,8 +179,13 @@ intersect (Range lo lop hop hi) (Range lo_ lop_ hop_ hi_) =
 -- ELM CONSTRAINT
 
 
-defaultElmVersion :: Constraint
-defaultElmVersion =
+goodElm :: Constraint -> Bool
+goodElm constraint =
+  satisfies constraint Compiler.version
+
+
+defaultElm :: Constraint
+defaultElm =
   if Package._major Compiler.version > 0
     then untilNextMajor Compiler.version
     else untilNextMinor Compiler.version
