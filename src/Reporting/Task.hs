@@ -3,11 +3,11 @@
 module Reporting.Task
   ( Task, run, throw, try
   , Env
-  , getVersionsPath
-  , getPackageCachePath, getPackageInfoPath
+  , getPackageCacheDir
+  , getPackageCacheDirFor
   , report
   , interleave
-  , fetch, fetchUrl, makeUrl
+  , fetch, makeUrl
   )
   where
 
@@ -45,7 +45,7 @@ type Task =
 data Env =
   Env
     { _maxConcurrentDownloads :: Int
-    , _cacheDirectory :: FilePath
+    , _cacheDir :: FilePath
     , _httpManager :: Http.Manager
     , _reporter :: Progress.Reporter
     }
@@ -54,9 +54,9 @@ data Env =
 run :: Progress.Reporter -> Task a -> IO (Either Error.Error a)
 run reporter task =
   Network.withSocketsDo $
-    do  cacheDir <- Assets.getPackageRoot
+    do  root <- Assets.getPackageRoot
         httpManager <- Http.newManager Http.tlsManagerSettings
-        let env = Env 4 cacheDir httpManager reporter
+        let env = Env 4 root httpManager reporter
         runReaderT (runExceptT task) env
 
 
@@ -74,29 +74,17 @@ try recover task =
 -- CACHING
 
 
-getVersionsPath :: Task FilePath
-getVersionsPath =
-  do  cacheDir <- getCacheDirectory
-      return (cacheDir </> "versions.dat")
+getPackageCacheDir :: Task FilePath
+getPackageCacheDir =
+  asks _cacheDir
 
 
-getPackageCachePath :: Name -> Version -> Task FilePath
-getPackageCachePath name version =
-  do  cacheDir <- getCacheDirectory
+getPackageCacheDirFor :: Name -> Version -> Task FilePath
+getPackageCacheDirFor name version =
+  do  cacheDir <- getPackageCacheDir
       let dir = cacheDir </> Pkg.toFilePath name </> Pkg.versionToString version
       liftIO (createDirectoryIfMissing True dir)
       return dir
-
-
-getPackageInfoPath :: Name -> Version -> Task FilePath
-getPackageInfoPath name version =
-  do  cacheDir <- getPackageCachePath name version
-      return (cacheDir </> "elm.dat")
-
-
-getCacheDirectory :: Task FilePath
-getCacheDirectory =
-  asks _cacheDirectory
 
 
 
@@ -131,7 +119,7 @@ interleave tasks =
 
 domain :: String
 domain =
-  "http://localhost:8008"
+  "http://localhost:8000"
 
 
 makeUrl :: String -> [(String,String)] -> String
@@ -159,12 +147,8 @@ versionParam =
 
 fetch :: String -> [(String, String)] -> (Http.Request -> Http.Manager -> IO a) -> Task a
 fetch path params handler =
-  fetchUrl (makeUrl path params) handler
-
-
-fetchUrl :: String -> (Http.Request -> Http.Manager -> IO a) -> Task a
-fetchUrl url handler =
-  do  manager <- asks _httpManager
+  do  let url = makeUrl path params
+      manager <- asks _httpManager
       result <- liftIO (fetchSafe url manager handler)
       either throwError return result
 
