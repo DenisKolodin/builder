@@ -7,10 +7,10 @@ module Elm.Project.Constraint
   , toString
   , toText
   , intersect
+  , defaultElmVersion
   , untilNextMajor
   , untilNextMinor
   , expand
-  , defaultElmVersion
   , isSatisfied
   , check
   , errorMessage
@@ -48,106 +48,7 @@ instance Binary Op
 
 
 
--- INTERSECT
-
-
-intersect :: Constraint -> Constraint -> Maybe Constraint
-intersect (Range lo lop hop hi) (Range lo_ lop_ hop_ hi_) =
-  let
-    (newLo, newLop) =
-      case compare lo lo_ of
-        LT -> (lo_, lop_)
-        EQ -> (lo, if elem Less [lop,lop_] then Less else LessOrEqual)
-        GT -> (lo, lop)
-
-    (newHi, newHop) =
-      case compare hi hi_ of
-        LT -> (hi, hop)
-        EQ -> (hi, if elem Less [hop, hop_] then Less else LessOrEqual)
-        GT -> (hi_, hop_)
-  in
-    if newLo <= newHi then
-      Just (Range newLo newLop newHop newHi)
-    else
-      Nothing
-
-
-
--- CREATE CONSTRAINTS
-
-
-untilNextMajor :: Package.Version -> Constraint
-untilNextMajor version =
-  Range version LessOrEqual Less (Package.bumpMajor version)
-
-
-untilNextMinor :: Package.Version -> Constraint
-untilNextMinor version =
-  Range version LessOrEqual Less (Package.bumpMinor version)
-
-
-expand :: Constraint -> Package.Version -> Constraint
-expand constraint@(Range lower lowerOp upperOp upper) version
-  | version < lower =
-      Range version LessOrEqual upperOp upper
-
-  | version > upper =
-      Range lower lowerOp Less (Package.bumpMajor version)
-
-  | otherwise =
-      constraint
-
-
-
--- ELM CONSTRAINT
-
-
-defaultElmVersion :: Constraint
-defaultElmVersion =
-  if Package._major Compiler.version > 0
-    then untilNextMajor Compiler.version
-    else untilNextMinor Compiler.version
-
-
-
--- CHECK IF SATISFIED
-
-
-isSatisfied :: Constraint -> Package.Version -> Bool
-isSatisfied constraint version =
-  case constraint of
-    Range lower lowerOp upperOp upper ->
-        isLess lowerOp lower version
-          &&
-        isLess upperOp version upper
-
-
-isLess :: (Ord a) => Op -> (a -> a -> Bool)
-isLess op =
-  case op of
-    Less ->
-      (<)
-
-    LessOrEqual ->
-      (<=)
-
-
-check :: Constraint -> Package.Version -> Ordering
-check constraint version =
-  case constraint of
-    Range lower lowerOp upperOp upper ->
-      if not (isLess lowerOp lower version) then
-        LT
-
-      else if not (isLess upperOp version upper) then
-        GT
-
-      else
-        EQ
-
-
-
--- STRING CONVERSION
+-- TEXT CONVERSION
 
 
 toString :: Constraint -> String
@@ -210,6 +111,105 @@ opFromText text =
 
     _ ->
       Nothing
+
+
+
+-- IS SATISFIED
+
+
+isSatisfied :: Constraint -> Package.Version -> Bool
+isSatisfied constraint version =
+  case constraint of
+    Range lower lowerOp upperOp upper ->
+        isLess lowerOp lower version
+          &&
+        isLess upperOp version upper
+
+
+isLess :: (Ord a) => Op -> (a -> a -> Bool)
+isLess op =
+  case op of
+    Less ->
+      (<)
+
+    LessOrEqual ->
+      (<=)
+
+
+check :: Constraint -> Package.Version -> Ordering
+check constraint version =
+  case constraint of
+    Range lower lowerOp upperOp upper ->
+      if not (isLess lowerOp lower version) then
+        LT
+
+      else if not (isLess upperOp version upper) then
+        GT
+
+      else
+        EQ
+
+
+
+-- INTERSECT
+
+
+intersect :: Constraint -> Constraint -> Maybe Constraint
+intersect (Range lo lop hop hi) (Range lo_ lop_ hop_ hi_) =
+  let
+    (newLo, newLop) =
+      case compare lo lo_ of
+        LT -> (lo_, lop_)
+        EQ -> (lo, if elem Less [lop,lop_] then Less else LessOrEqual)
+        GT -> (lo, lop)
+
+    (newHi, newHop) =
+      case compare hi hi_ of
+        LT -> (hi, hop)
+        EQ -> (hi, if elem Less [hop, hop_] then Less else LessOrEqual)
+        GT -> (hi_, hop_)
+  in
+    if newLo <= newHi then
+      Just (Range newLo newLop newHop newHi)
+    else
+      Nothing
+
+
+
+-- ELM CONSTRAINT
+
+
+defaultElmVersion :: Constraint
+defaultElmVersion =
+  if Package._major Compiler.version > 0
+    then untilNextMajor Compiler.version
+    else untilNextMinor Compiler.version
+
+
+
+-- CREATE CONSTRAINTS
+
+
+untilNextMajor :: Package.Version -> Constraint
+untilNextMajor version =
+  Range version LessOrEqual Less (Package.bumpMajor version)
+
+
+untilNextMinor :: Package.Version -> Constraint
+untilNextMinor version =
+  Range version LessOrEqual Less (Package.bumpMinor version)
+
+
+expand :: Constraint -> Package.Version -> Constraint
+expand constraint@(Range lower lowerOp upperOp upper) version
+  | version < lower =
+      Range version LessOrEqual upperOp upper
+
+  | version > upper =
+      Range lower lowerOp Less (Package.bumpMajor version)
+
+  | otherwise =
+      constraint
 
 
 
