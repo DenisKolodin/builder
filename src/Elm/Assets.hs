@@ -1,7 +1,6 @@
 {-# OPTIONS_GHC -Wall #-}
 module Elm.Assets
-  ( projectPath
-  , getPackageRoot
+  ( getPackageRoot
   , getReplRoot
   , getMakeRoot
   )
@@ -16,16 +15,7 @@ import qualified Elm.Package as Pkg
 
 
 
--- PATHS
-
-
-projectPath :: FilePath
-projectPath =
-  "elm.json"
-
-
-
--- GET ROOTS
+-- ROOTS
 
 
 getPackageRoot :: IO FilePath
