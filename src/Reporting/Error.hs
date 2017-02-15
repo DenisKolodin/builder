@@ -12,13 +12,15 @@ import Data.Text (Text)
 import qualified Data.List as List
 import Text.PrettyPrint.ANSI.Leijen
   ( Doc, (<+>), align, dullred, dullyellow
-  , fillSep, indent, text, vcat
+  , fillSep, indent, red, text, vcat
   )
 
 import qualified Elm.Assets as Assets
 import qualified Elm.Compiler as Compiler
 import qualified Elm.Package as Pkg
+import Elm.Package (Name, Version)
 
+import Elm.Project.Constraint (Constraint)
 import qualified Elm.Project.Constraint as C
 import qualified Reporting.Error.Assets as AssetsError
 import qualified Reporting.Error.Help as Help
@@ -32,27 +34,28 @@ import Reporting.Error.Help (reflow, stack)
 data Error
   = Assets AssetsError.Error
 
-  -- misc
-  | BadElmVersion Pkg.Version Bool C.Constraint
-  | SystemCallFailed String
-  | HttpRequestFailed String String
-  | ZipDownloadFailed Pkg.Name Pkg.Version
-  | AddTrickyConstraint Pkg.Name Pkg.Version C.Constraint
+  -- deps
+  | ElmVersionMismatch Constraint
   | ConstraintsHaveNoSolution [Hint]
-  | BadInstall Pkg.Version
+
+  -- misc
+  | HttpRequestFailed String String
+  | ZipDownloadFailed Name Version
+  | AddTrickyConstraint Name Version Constraint
+  | BadInstall Version
 
   -- diffs
   | Undiffable
   | VersionInvalid
   | VersionJustChanged
   | BadMetadata [String]
-  | MissingTag Pkg.Version
+  | MissingTag Version
 
   -- bumps
-  | AlreadyPublished Pkg.Version
-  | Unbumpable Pkg.Version [Pkg.Version]
-  | InvalidBump Pkg.Version Pkg.Version
-  | BadBump Pkg.Version Pkg.Version Magnitude Pkg.Version Magnitude
+  | AlreadyPublished Version
+  | Unbumpable Version [Version]
+  | InvalidBump Version Version
+  | BadBump Version Version Magnitude Version Magnitude
 
   -- compilation
   | BadCompile FilePath Text [Compiler.Error]
@@ -70,9 +73,9 @@ data Magnitude
 
 
 data Hint
-  = EmptyConstraint Pkg.Name C.Constraint
-  | IncompatibleConstraint Pkg.Name C.Constraint Pkg.Version
-  | IncompatiblePackage Pkg.Name
+  = EmptyConstraint Name Constraint
+  | IncompatibleConstraint Name Constraint Version
+  | IncompatiblePackage Name
 
 
 
@@ -98,14 +101,14 @@ toDoc err =
     BadCompile file source errors ->
       Help.makeErrorDoc "Bad compile" [text file, text "TODO"]
 
-    BadElmVersion elmVersion isGreater elmConstraint ->
+    ElmVersionMismatch constraint ->
       Help.makeErrorDoc
-        ( "You are using Elm " ++ Pkg.versionToString elmVersion
+        ( "You are using Elm " ++ Pkg.versionToString Compiler.version
           ++ ", but this project is saying it needs a version in this range: "
-          ++ C.toString elmConstraint
+          ++ C.toString constraint
         )
         ( map reflow $
-            if isGreater then
+            if error "TODO - ElmVersionMismatch" then
               [ "This means this package has not been upgraded for the newer version of Elm yet.\
                 \ Check out the upgrade docs for guidance on how to get things working again:\
                 \ <https://github.com/elm-lang/elm-platform/tree/master/upgrade-docs>"
@@ -119,14 +122,13 @@ toDoc err =
               ]
         )
 
-    SystemCallFailed problem ->
-      Help.makeErrorDoc "A system call failed." [ text problem ]
-
     HttpRequestFailed url message ->
       Help.makeErrorDoc
-        ( "The following HTTP request failed. <" ++ url ++ ">"
+        ( "The following HTTP request failed:"
         )
-        [ text message
+        [ indent 4 $ dullyellow $ text $ "<" ++ url ++ ">"
+        , text "Here is the error message I was able to extract:"
+        , indent 4 $ reflow message
         ]
 
     ZipDownloadFailed name version ->
@@ -142,7 +144,7 @@ toDoc err =
           [] ->
             [ reflow $
                 "One way to rebuild your constraints is to clear everything out of\
-                \ the \"dependencies\" field of " ++ Assets.projectPath ++ " and add\
+                \ the \"dependencies\" field of elm.json and add\
                 \ them back one at a time with `elm-package install`."
             , reflow $
                 "I hope to automate this in the future, but at least there is\
@@ -154,8 +156,7 @@ toDoc err =
 
     AddTrickyConstraint name version constraint ->
       Help.makeErrorDoc
-        ( "This change is too tricky for me. Your " ++ Assets.projectPath
-          ++ " already lists the following dependency:"
+        ( "This change is too tricky for me. Your elm.json already lists the following dependency:"
         )
         [ indent 4 $ text $ showDependency name constraint
         , reflow $
@@ -167,7 +168,7 @@ toDoc err =
             , C.toString (C.untilNextMajor version)
             ]
         , reflow $
-            "Modify " ++ Assets.projectPath ++ " by hand to be exactly what you want."
+            "Modify elm.json by hand to be exactly what you want."
         ]
 
     BadInstall version ->
@@ -195,7 +196,7 @@ toDoc err =
 
     BadMetadata problems ->
       Help.makeErrorDoc
-        ( "Some of the fields in " ++ Assets.projectPath ++ " have not been filled in yet:"
+        ( "Some of the fields in elm.json have not been filled in yet:"
         )
         [ vcat (map text problems)
         , text $ "Fill these in and try to publish again!"
@@ -242,31 +243,29 @@ toDoc err =
       in
         Help.makeErrorDoc
           ( "To compute a version bump, I need to start with a version that has\
-            \ already been published. Your " ++ Assets.projectPath
-            ++ " says I should start with version "
+            \ already been published. Your elm.json says I should start with version "
             ++ Pkg.versionToString vsn
             ++ ", but I cannot find that version on <http://package.elm-lang.org>."
           )
           [ reflow $
-              "Try again after changing the version in " ++ Assets.projectPath ++ list
+              "Try again after changing the version in elm.json" ++ list
           ]
 
     InvalidBump statedVersion latestVersion ->
       Help.makeErrorDoc
-        ( "Your " ++ Assets.projectPath ++ " says the next version should be "
+        ( "Your elm.json says the next version should be "
           ++ Pkg.versionToString statedVersion ++ ", but that is not valid\
           \ based on the previously published versions."
         )
         [ reflow $
             "Generally, you want to put the most recently published version ("
-            ++ Pkg.versionToString latestVersion ++ " for this package) in your "
-            ++ Assets.projectPath
-            ++ " and run `elm-package bump` to figure out what should come next."
+            ++ Pkg.versionToString latestVersion
+            ++ " for this package) in your elm.json and run `elm-package bump` to figure out what should come next."
         ]
 
     BadBump old new magnitude realNew realMagnitude ->
       Help.makeErrorDoc
-        ( "Your " ++ Assets.projectPath ++ " says the next version should be "
+        ( "Your elm.json says the next version should be "
           ++ Pkg.versionToString new ++ ", indicating a " ++ show magnitude
           ++ " change to the public API. This does not match the API diff given by:"
         )
@@ -283,7 +282,7 @@ toDoc err =
         ]
 
 
-showDependency :: Pkg.Name -> C.Constraint -> String
+showDependency :: Name -> Constraint -> String
 showDependency name constraint =
     show (Pkg.toString name) ++ ": " ++ show (C.toString constraint)
 
@@ -293,7 +292,7 @@ hintToDoc hint =
   case hint of
     EmptyConstraint name constraint ->
       stack
-        [ reflow $ "Your " ++ Assets.projectPath ++ " has the following dependency:"
+        [ reflow $ "Your elm.json has the following dependency:"
         , indent 4 $ text $ showDependency name constraint
         , reflow $
             "But there are no released versions in that range! I recommend\
@@ -303,7 +302,7 @@ hintToDoc hint =
 
     IncompatibleConstraint name constraint viableVersion ->
       stack
-        [ reflow $ "Your " ++ Assets.projectPath ++ " has the following dependency:"
+        [ reflow $ "Your elm.json has the following dependency:"
         , indent 4 $ text $ showDependency name constraint
         , reflow $
             "But none of the versions in that range work with Elm "
