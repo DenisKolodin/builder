@@ -1,167 +1,131 @@
 module Deps.Solver (solve) where
 
-import Control.Monad (forM)
-import Control.Monad.Except (throwError)
-import Control.Monad.State (StateT, evalStateT, runStateT)
+import Control.Monad (foldM, guard, mzero, msum)
+import Control.Monad.Logic (LogicT, runLogicT, lift)
 import qualified Data.List as List
 import qualified Data.Map as Map
-import qualified Data.Maybe as Maybe
+import Data.Map (Map)
 
-import qualified Elm.Compiler as Compiler
-import qualified Elm.Package.Constraint as C
-import qualified Elm.Package as Package
-import qualified Elm.Package.Solution as S
-import qualified Manager
+import Elm.Package (Name, Version)
+
+import qualified Deps.Explorer as Explorer
+import Elm.Project.Constraint (Constraint)
+import qualified Elm.Project.Constraint as Con
 import qualified Reporting.Error as Error
-import qualified Store
+import qualified Reporting.Task as Task
 
 
 
--- ACTUALLY TRY TO SOLVE
+-- SOLVE
 
 
-solve :: C.Constraint -> [(Package.Name, C.Constraint)] -> Manager.Manager S.Solution
-solve elmConstraint constraints =
-  case C.check elmConstraint Compiler.version of
-    LT ->
-      throwError $ Error.BadElmVersion Compiler.version False elmConstraint
+solve :: Constraint -> Map Name Constraint -> Task.Task (Maybe (Map Name Version))
+solve elm cons =
+  if not (Con.goodElm elm) then
+    Task.throw (Error.ElmVersionMismatch elm)
 
-    GT ->
-      throwError $ Error.BadElmVersion Compiler.version True elmConstraint
+  else
+    Explorer.run $
+      runLogicT
+        (mkSolver (State Map.empty cons))
+        (const . return . Just)
+        (return Nothing)
 
-    EQ ->
-      do  store <- Store.initialStore
-          (maybeSolution, newStore) <- runStateT (exploreConstraints constraints) store
-          case maybeSolution of
-            Just solution ->
-              return solution
 
-            Nothing ->
-              do  hints <- evalStateT (mapM incompatibleWithCompiler constraints) newStore
-                  throwError (Error.ConstraintsHaveNoSolution (Maybe.catMaybes hints))
+type Solver a =
+  LogicT Explorer.Explorer a
 
 
 
--- EXPLORE CONSTRAINTS
+-- SOLVER
 
 
-type Explorer a =
-    StateT Store.Store Manager.Manager a
+data State =
+  State
+    { _solution :: Map Name Version
+    , _unsolved :: Map Name Constraint
+    }
 
 
-type Packages =
-    Map.Map Package.Name [Package.Version]
-
-
-exploreConstraints :: [(Package.Name, C.Constraint)] -> Explorer (Maybe S.Solution)
-exploreConstraints constraints =
-  do  maybeInitialPackages <- addConstraints Map.empty constraints
-      let initialPackages = maybe Map.empty id maybeInitialPackages
-      explorePackages Map.empty initialPackages
-
-
-explorePackages :: S.Solution -> Packages -> Explorer (Maybe S.Solution)
-explorePackages solution availablePackages =
-  case Map.minViewWithKey availablePackages of
+mkSolver :: State -> Solver (Map Name Version)
+mkSolver (State solution unsolved) =
+  case Map.minViewWithKey unsolved of
     Nothing ->
-      return (Just solution)
+      return solution
 
-    Just ((name, versions), remainingPackages) ->
-      exploreVersionList name versions solution remainingPackages
+    Just ((name, constraint), otherUnsolved) ->
+      do  allVersions <- lift $ Explorer.getVersions name
+          let versions =
+                reverse $ List.sort $
+                  filter (Con.satisfies constraint) allVersions
 
-
-exploreVersionList :: Package.Name -> [Package.Version] -> S.Solution -> Packages -> Explorer (Maybe S.Solution)
-exploreVersionList name versions solution remainingPackages =
-    go (reverse (List.sort versions))
-  where
-    go versions =
-      case versions of
-        [] ->
-          return Nothing
-
-        version : rest ->
-          do  maybeSolution <- exploreVersion name version solution remainingPackages
-              case maybeSolution of
-                Nothing -> go rest
-                answer -> return answer
+          let state1 = State solution otherUnsolved
+          state2 <- msum (map (addVersion state1 name) versions)
+          mkSolver state2
 
 
-exploreVersion :: Package.Name -> Package.Version -> S.Solution -> Packages -> Explorer (Maybe S.Solution)
-exploreVersion name version solution remainingPackages =
-  do  (elmConstraint, constraints) <- Store.getConstraints name version
-      if C.isSatisfied elmConstraint Compiler.version
-        then explore constraints
-        else return Nothing
+addVersion :: State -> Name -> Version -> Solver State
+addVersion (State solution unsolved) name version =
+  do  (Explorer.Info elm cons) <-
+        lift $ Explorer.getConstraints name version
 
-  where
-    explore constraints =
-      do  let (overlappingConstraints, newConstraints) =
-                  List.partition (\(name, _) -> Map.member name solution) constraints
-
-          case all (satisfiedBy solution) overlappingConstraints of
-            False ->
-              return Nothing
-
-            True ->
-              do  maybePackages <- addConstraints remainingPackages newConstraints
-                  case maybePackages of
-                    Nothing -> return Nothing
-                    Just extendedPackages ->
-                        explorePackages (Map.insert name version solution) extendedPackages
+      guard (Con.goodElm elm)
+      newUnsolved <- foldM (addConstraint solution) unsolved (Map.toList cons)
+      return (State (Map.insert name version solution) newUnsolved)
 
 
-satisfiedBy :: S.Solution -> (Package.Name, C.Constraint) -> Bool
-satisfiedBy solution (name, constraint) =
+addConstraint :: Map Name Version -> Map Name Constraint -> (Name, Constraint) -> Solver (Map Name Constraint)
+addConstraint solution unsolved (name, newConstraint) =
   case Map.lookup name solution of
-    Nothing ->
-      False
-
     Just version ->
-      C.isSatisfied constraint version
+      if Con.satisfies newConstraint version then
+        return unsolved
+      else
+        mzero
+
+    Nothing ->
+      case Map.lookup name unsolved of
+        Nothing ->
+          return $ Map.insert name newConstraint unsolved
+
+        Just oldConstraint ->
+          case Con.intersect oldConstraint newConstraint of
+            Nothing ->
+              mzero
+
+            Just mergedConstraint ->
+              if oldConstraint == mergedConstraint then
+                return unsolved
+              else
+                return (Map.insert name mergedConstraint unsolved)
 
 
-addConstraints :: Packages -> [(Package.Name, C.Constraint)] -> Explorer (Maybe Packages)
-addConstraints packages constraints =
-  case constraints of
-    [] ->
-      return (Just packages)
 
-    (name, constraint) : rest ->
-      do  versions <- Store.getVersions name
-          case filter (C.isSatisfied constraint) versions of
-            [] ->
-              return Nothing
-
-            vs ->
-              addConstraints (Map.insert name vs packages) rest
+{-- FAILURE HINTS
 
 
-
--- FAILURE HINTS
-
-
-incompatibleWithCompiler :: (Package.Name, C.Constraint) -> Explorer (Maybe Error.Hint)
+incompatibleWithCompiler :: (Name, Constraint) -> Explorer (Maybe Error.Hint)
 incompatibleWithCompiler (name, constraint) =
-  do  allVersions <- Store.getVersions name
+  do  allVersions <- Explorer.getVersions name
       let presentAndFutureVersions =
-            filter (\vsn -> C.check constraint vsn /= LT) allVersions
+            filter (\vsn -> Con.check constraint vsn /= LT) allVersions
 
       compilerConstraints <-
         forM presentAndFutureVersions $ \vsn ->
-          do  elmConstraint <- fst <$> Store.getConstraints name vsn
+          do  elmConstraint <- fst <$> Explorer.getConstraints name vsn
               return (vsn, elmConstraint)
 
-      case filter (isCompatible . snd) compilerConstraints of
+      case filter (Con.goodElm . snd) compilerConstraints of
         [] ->
           return $ Just $ Error.IncompatiblePackage name
 
         compatibleVersions ->
-          case filter (C.isSatisfied constraint . fst) compilerConstraints of
+          case filter (Con.satisfies constraint . fst) compilerConstraints of
             [] ->
               return $ Just $ Error.EmptyConstraint name constraint
 
             pairs ->
-              if any (isCompatible . snd) pairs then
+              if any (Con.goodElm . snd) pairs then
                 return Nothing
 
               else
@@ -169,7 +133,4 @@ incompatibleWithCompiler (name, constraint) =
                   Error.IncompatibleConstraint name constraint $
                     maximum (map fst compatibleVersions)
 
-
-isCompatible :: C.Constraint -> Bool
-isCompatible constraint =
-  C.isSatisfied constraint Compiler.version
+-}
