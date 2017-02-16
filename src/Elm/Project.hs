@@ -1,15 +1,15 @@
 {-# OPTIONS_GHC -Wall #-}
-{-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE OverloadedStrings #-}
 module Elm.Project
   ( module Elm.Project.Internal
-  , path
-  , unsafeRead
+  , read
   , write
-  , toName, toPkgName, toPkgVersion
+
+  , getTransDeps
+  , toSolution
+  , isSameSolution
+
+  , toName
   , toSourceDir, toNative
-  , matchesCompilerVersion
-  , toSolution, toDirectDeps
   , toRoots
   )
   where
@@ -33,27 +33,19 @@ import qualified Reporting.Task as Task
 
 
 
--- PATH
-
-
-path :: FilePath
-path =
-  "elm.json"
-
-
-
 -- READ
 
 
-unsafeRead :: FilePath -> Task.Task Project
-unsafeRead filePath =
-  do  byteString <- liftIO (BS.readFile filePath)
-      case parse byteString of
+read :: FilePath -> Task.Task Project
+read filePath =
+  do  bits <- liftIO (BS.readFile filePath)
+      case parse bits of
+        Left err ->
+          Task.throw (Error.Assets (E.BadElmJson filePath err))
+
         Right project ->
           return project
 
-        Left err ->
-          Task.throw (Error.Assets (E.CorruptProject path err))
 
 
 
@@ -87,22 +79,31 @@ checkOverlap deps tests =
 
 
 
+-- TRANSITIVE DEPS
+
+
+getTransDeps :: Project -> TransitiveDeps
+getTransDeps project =
+  destruct _app_deps _pkg_transitive_deps project
+
+
+toSolution :: TransitiveDeps -> Map Name Version
+toSolution (TransitiveDeps a b c d) =
+  Map.unions [a,b,c,d]
+
+
+isSameSolution :: Map Name Version -> TransitiveDeps -> Bool
+isSameSolution solution (TransitiveDeps a b c d) =
+  solution == Map.unions [ a, b, c, d ]
+
+
+
 -- REPO
 
 
 toName :: Project -> Maybe Name
 toName project =
-  destruct (const Nothing) (Just . toPkgName) project
-
-
-toPkgName :: PkgInfo -> Name
-toPkgName info =
-  _pkg_name info
-
-
-toPkgVersion :: PkgInfo -> Version
-toPkgVersion info =
-  _pkg_version info
+  destruct (const Nothing) (Just . _pkg_name) project
 
 
 
@@ -127,36 +128,6 @@ destruct appFunc pkgFunc project =
 
     Pkg info ->
       pkgFunc info
-
-
-matchesCompilerVersion :: Project -> Bool
-matchesCompilerVersion project =
-  case project of
-    App info ->
-      _app_elm_version info == Compiler.version
-
-    Pkg info ->
-      C.goodElm (_pkg_elm_version info)
-
-
-toSolution :: Project -> Map Name Version
-toSolution project =
-  toSolutionHelp $ destruct _app_deps _pkg_transitive_deps project
-
-
-toSolutionHelp :: TransitiveDeps -> Map Name Version
-toSolutionHelp (TransitiveDeps a b c d) =
-  Map.unions [a,b,c,d]
-
-
-toDirectDeps :: Project -> Set.Set Name
-toDirectDeps project =
-  toDirectDepsHelp $ destruct _app_deps _pkg_transitive_deps project
-
-
-toDirectDepsHelp :: TransitiveDeps -> Set.Set Name
-toDirectDepsHelp (TransitiveDeps a b _ _) =
-  Map.keysSet (Map.union a b)
 
 
 toRoots :: Project -> [Module.Raw]
