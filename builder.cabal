@@ -52,12 +52,16 @@ Library
         Reporting.Progress,
         Reporting.Progress.Terminal,
         Reporting.Task,
-        Stuff.Interfaces,
-        Stuff.Validate
+        Stuff.Info,
+        Stuff.Interfaces
 
     other-modules:
         Deps.Explorer,
+        Deps.Get,
+        Deps.Solver.Internal,
+        Deps.Verify,
         Deps.Website,
+        Elm.Project.Internal,
         Reporting.Error.Assets,
         Reporting.Error.Help,
         Reporting.Progress.Bar,
