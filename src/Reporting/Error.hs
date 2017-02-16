@@ -34,8 +34,11 @@ import Reporting.Error.Help (reflow, stack)
 data Error
   = Assets AssetsError.Error
 
-  -- deps
-  | NoSolution [Name]
+  -- verify
+  | AppBadElm Version
+  | AppBadDeps
+  | PkgBadElm Constraint
+  | PkgBadDeps
 
   -- misc
   | HttpRequestFailed String String
@@ -115,9 +118,6 @@ toDoc err =
           ++ " " ++ Pkg.versionToString version ++ " code."
         )
         []
-
-    NoSolution hints ->
-      error "TODO" hints
 
     AddTrickyConstraint name version constraint ->
       Help.makeErrorDoc
