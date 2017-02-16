@@ -1,4 +1,4 @@
-module Deps.Solver.Internal (solve) where
+module Deps.Solver.Internal (Solver, run, solve) where
 
 import Control.Monad (foldM, guard, mzero, msum)
 import Control.Monad.Logic (LogicT, runLogicT, lift)
@@ -8,6 +8,7 @@ import Data.Map (Map)
 
 import Elm.Package (Name, Version)
 
+import Deps.Explorer (Explorer)
 import qualified Deps.Explorer as Explorer
 import Elm.Project.Constraint (Constraint)
 import qualified Elm.Project.Constraint as Con
@@ -19,21 +20,18 @@ import qualified Reporting.Task as Task
 -- SOLVE
 
 
-solve :: Constraint -> Map Name Constraint -> Task.Task (Maybe (Map Name Version))
-solve elm cons =
-  if not (Con.goodElm elm) then
-    Task.throw (Error.ElmVersionMismatch elm)
-
-  else
-    Explorer.run $
-      runLogicT
-        (mkSolver (State Map.empty cons))
-        (const . return . Just)
-        (return Nothing)
+solve :: Map Name Constraint -> Solver (Map Name Version)
+solve cons =
+  mkSolver (State Map.empty cons)
 
 
 type Solver a =
-  LogicT Explorer.Explorer a
+  LogicT Explorer a
+
+
+run :: Solver a -> Explorer (Maybe a)
+run solver =
+  runLogicT solver (const . return . Just) (return Nothing)
 
 
 
@@ -99,38 +97,3 @@ addConstraint solution unsolved (name, newConstraint) =
               else
                 return (Map.insert name mergedConstraint unsolved)
 
-
-
-{-- FAILURE HINTS
-
-
-incompatibleWithCompiler :: (Name, Constraint) -> Explorer (Maybe Error.Hint)
-incompatibleWithCompiler (name, constraint) =
-  do  allVersions <- Explorer.getVersions name
-      let presentAndFutureVersions =
-            filter (\vsn -> Con.check constraint vsn /= LT) allVersions
-
-      compilerConstraints <-
-        forM presentAndFutureVersions $ \vsn ->
-          do  elmConstraint <- fst <$> Explorer.getConstraints name vsn
-              return (vsn, elmConstraint)
-
-      case filter (Con.goodElm . snd) compilerConstraints of
-        [] ->
-          return $ Just $ Error.IncompatiblePackage name
-
-        compatibleVersions ->
-          case filter (Con.satisfies constraint . fst) compilerConstraints of
-            [] ->
-              return $ Just $ Error.EmptyConstraint name constraint
-
-            pairs ->
-              if any (Con.goodElm . snd) pairs then
-                return Nothing
-
-              else
-                return $ Just $
-                  Error.IncompatibleConstraint name constraint $
-                    maximum (map fst compatibleVersions)
-
--}
