@@ -1,6 +1,6 @@
 {-# OPTIONS_GHC -Wall #-}
 {-# LANGUAGE DeriveGeneric #-}
-module Stuff.Validate
+module Stuff.Info
   ( DepsInfo
   , getPackages
   , getDepModules, DepModules

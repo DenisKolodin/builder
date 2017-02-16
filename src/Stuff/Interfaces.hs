@@ -17,7 +17,7 @@ import qualified Elm.Package as Pkg
 
 import qualified File.IO as IO
 import qualified Reporting.Task as Task
-import qualified Stuff.Validate as Stuff
+import qualified Stuff.Info as Stuff
 import qualified Stuff.Paths as Path
 
 
