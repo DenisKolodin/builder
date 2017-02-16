@@ -145,7 +145,11 @@ versionParam =
 -- HTTP
 
 
-fetch :: String -> [(String, String)] -> (Http.Request -> Http.Manager -> IO a) -> Task a
+fetch
+  :: String
+  -> [(String, String)]
+  -> (Http.Request -> Http.Manager -> IO (Either String a))
+  -> Task a
 fetch path params handler =
   do  let url = makeUrl path params
       manager <- asks _httpManager
@@ -156,7 +160,7 @@ fetch path params handler =
 fetchSafe
   :: String
   -> Http.Manager
-  -> (Http.Request -> Http.Manager -> IO a)
+  -> (Http.Request -> Http.Manager -> IO (Either String a))
   -> IO (Either Error.Error a)
 fetchSafe url manager handler =
   fetchUnsafe url manager handler
@@ -167,12 +171,17 @@ fetchSafe url manager handler =
 fetchUnsafe
   :: String
   -> Http.Manager
-  -> (Http.Request -> Http.Manager -> IO a)
-  -> IO (Either err a)
+  -> (Http.Request -> Http.Manager -> IO (Either String a))
+  -> IO (Either Error.Error a)
 fetchUnsafe url manager handler =
   do  request <- Http.parseUrlThrow url
       result <- handler request manager
-      return (Right result)
+      case result of
+        Right value ->
+          return (Right value)
+
+        Left msg ->
+          return (Left (Error.HttpRequestFailed url msg))
 
 
 handleHttpError :: String -> Http.HttpException -> IO (Either Error.Error b)

@@ -41,7 +41,8 @@ all =
 
 fetchAll :: FilePath -> Task.Task (Map Name [Version])
 fetchAll versionsFile =
-  do  (size, packages) <- Website.getAllPackages
+  do  packages <- Website.getAllPackages
+      let size = Map.foldr ((+) . length) 0 packages
       IO.writeBinary versionsFile (size, packages)
       return packages
 

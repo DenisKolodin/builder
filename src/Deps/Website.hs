@@ -1,21 +1,23 @@
 {-# OPTIONS_GHC -Wall #-}
 {-# LANGUAGE OverloadedStrings #-}
 module Deps.Website
-  ( getPkgInfo
+  ( getElmJson
   , getNewPackages
   , getAllPackages
   )
   where
 
+import qualified Data.Aeson as Json
 import qualified Data.Binary as Binary
+import qualified Data.ByteString.Lazy as BS
+import qualified Data.HashMap.Lazy as HashMap
 import qualified Data.Map as Map
 import qualified Network.HTTP.Client as Client
 import qualified Network.HTTP.Client.MultipartFormData as Multi
 
 import Elm.Package (Name, Version)
-import qualified Elm.Package as Package
+import qualified Elm.Package as Pkg
 
-import qualified Elm.Project as Project
 import qualified Reporting.Task as Task
 
 
@@ -23,61 +25,91 @@ import qualified Reporting.Task as Task
 -- GET PACKAGE INFO
 
 
-getPkgInfo :: Name -> Version -> Task.Task Project.PkgInfo
-getPkgInfo name version =
-  let
-    path =
-      "packages/" ++ Package.toUrl name
-      ++ "/" ++ Package.versionToString version
-      ++ "/elm.json"
-
-    fetchContent =
-      Task.fetch path [] $ \request manager ->
-        do  response <- Client.httpLbs request manager
-            return (Client.responseBody response)
-  in
-    do  json <- fetchContent
-        case Project.parse json of
-          Right (Project.Pkg info) ->
-            return info
-
-          _ ->
-            Task.throw (error "TODO getPkgInfo")
+getElmJson :: Name -> Version -> Task.Task BS.ByteString
+getElmJson name version =
+  fetchByteString (packageUrl name version "elm.json")
 
 
-
--- EASY REQUESTS
-
-
-versions :: Name -> Task.Task (Maybe [Version])
-versions name =
-  fetchBinary "versions" [("name", Package.toString name)]
-
-
-permissions :: Name -> Task.Task Bool
-permissions name =
-  fetchBinary "permissions" [("name", Package.toString name)]
-
-
-fetchBinary :: (Binary.Binary a) => String -> [(String,String)] -> Task.Task a
-fetchBinary path params =
-  Task.fetch path params $ \request manager ->
-    do  response <- Client.httpLbs request manager
-        return $ Binary.decode $ Client.responseBody response
+packageUrl :: Name -> Version -> FilePath -> String
+packageUrl name version filePath =
+  "packages/"
+  ++ Pkg.toUrl name
+  ++ "/"
+  ++ Pkg.versionToString version
+  ++ "/"
+  ++ filePath
 
 
 
 -- NEW PACKAGES
 
 
-getNewPackages :: Integer -> Task.Task (Integer, [(Name, Version)])
-getNewPackages time =
-  fetchBinary "new-packages" [("since", show time)]
+getNewPackages :: Int -> Task.Task [(Name, Version)]
+getNewPackages index =
+  fetchJson ("all-packages/since/" ++ show index)
 
 
-getAllPackages :: Task.Task (Integer, Map.Map Name [Version])
+
+-- ALL PACKAGES
+
+
+getAllPackages :: Task.Task (Map.Map Name [Version])
 getAllPackages =
-  fetchBinary "new-packages" []
+  _allPkgs <$> fetchJson "all-packages"
+
+
+data AllPkgs =
+  AllPkgs { _allPkgs :: Map.Map Name [Version] }
+
+
+instance Json.FromJSON AllPkgs where
+  parseJSON =
+    let
+      depair (key, value) =
+        do  name <- Json.parseJSON (Json.String key)
+            versions <- Json.parseJSON value
+            return (name, versions)
+    in
+      Json.withObject "all-packages" $ \obj ->
+        do  kvs <- traverse depair (HashMap.toList obj)
+            return (AllPkgs (Map.fromList kvs))
+
+
+
+-- HELPERS
+
+
+fetchBinary :: (Binary.Binary a) => String -> Task.Task a
+fetchBinary path =
+  Task.fetch path [] $ \request manager ->
+    do  response <- Client.httpLbs request manager
+        let bits = Client.responseBody response
+        case Binary.decodeOrFail bits of
+          Right (_, _, value) ->
+            return (Right value)
+
+          Left (_, _, msg) ->
+            return (Left ("I received corrupt binary data from server.\n" ++ msg))
+
+
+fetchByteString :: String -> Task.Task BS.ByteString
+fetchByteString path =
+  Task.fetch path [] $ \request manager ->
+    do  response <- Client.httpLbs request manager
+        return $ Right $ Client.responseBody response
+
+
+fetchJson :: (Json.FromJSON a) => String -> Task.Task a
+fetchJson path =
+  Task.fetch path [] $ \request manager ->
+    do  response <- Client.httpLbs request manager
+        let bits = Client.responseBody response
+        case Json.eitherDecode bits of
+          Right value ->
+            return (Right value)
+
+          Left msg ->
+            return (Left ("I received corrupt JSON from server.\n" ++ msg))
 
 
 
@@ -88,8 +120,8 @@ register :: Name -> Version -> Task.Task ()
 register name version =
   let
     params =
-      [ ("name", Package.toString name)
-      , ("version", Package.versionToString version)
+      [ ("name", Pkg.toString name)
+      , ("version", Pkg.versionToString version)
       ]
 
     files =
@@ -102,5 +134,5 @@ register name version =
       do  request' <- Multi.formDataBody files request
           let request'' = request' { Client.responseTimeout = Nothing }
           Client.httpLbs request'' manager
-          return ()
+          return (Right ())
 
