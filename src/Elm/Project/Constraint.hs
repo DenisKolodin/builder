@@ -3,6 +3,8 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Elm.Project.Constraint
   ( Constraint
+  , exactly
+  , anything
   , fromText
   , toString
   , toText
@@ -24,8 +26,9 @@ import qualified Data.Aeson as Json
 import qualified Data.Text as Text
 import Data.Text (Text)
 
-import qualified Elm.Package as Package
 import qualified Elm.Compiler as Compiler
+import qualified Elm.Package as Pkg
+import Elm.Package (Version(..))
 
 
 
@@ -33,7 +36,7 @@ import qualified Elm.Compiler as Compiler
 
 
 data Constraint
-    = Range Package.Version Op Op Package.Version
+    = Range Version Op Op Version
     deriving (Eq, Generic)
 
 
@@ -45,6 +48,20 @@ data Op
 
 instance Binary Constraint
 instance Binary Op
+
+
+
+-- COMMON CONSTRAINTS
+
+
+exactly :: Version -> Constraint
+exactly version =
+  Range version LessOrEqual LessOrEqual version
+
+
+anything :: Constraint
+anything =
+  Range (Version 1 0 0) LessOrEqual LessOrEqual (Version 30000 0 0)
 
 
 
@@ -61,11 +78,11 @@ toText constraint =
   case constraint of
     Range lower lowerOp upperOp upper ->
       Text.intercalate " "
-        [ Package.versionToText lower
+        [ Pkg.versionToText lower
         , opToText lowerOp
         , "v"
         , opToText upperOp
-        , Package.versionToText upper
+        , Pkg.versionToText upper
         ]
 
 
@@ -94,10 +111,10 @@ fromText text =
       Nothing
 
 
-versionFromText :: Text -> Maybe Package.Version
+versionFromText :: Text -> Maybe Version
 versionFromText text =
   either (const Nothing) Just $
-    Package.versionFromText text
+    Pkg.versionFromText text
 
 
 opFromText :: Text -> Maybe Op
@@ -117,7 +134,7 @@ opFromText text =
 -- IS SATISFIED
 
 
-satisfies :: Constraint -> Package.Version -> Bool
+satisfies :: Constraint -> Version -> Bool
 satisfies constraint version =
   case constraint of
     Range lower lowerOp upperOp upper ->
@@ -136,7 +153,7 @@ isLess op =
       (<=)
 
 
-check :: Constraint -> Package.Version -> Ordering
+check :: Constraint -> Version -> Ordering
 check constraint version =
   case constraint of
     Range lower lowerOp upperOp upper ->
@@ -186,7 +203,7 @@ goodElm constraint =
 
 defaultElm :: Constraint
 defaultElm =
-  if Package._major Compiler.version > 0
+  if Pkg._major Compiler.version > 0
     then untilNextMajor Compiler.version
     else untilNextMinor Compiler.version
 
@@ -195,23 +212,23 @@ defaultElm =
 -- CREATE CONSTRAINTS
 
 
-untilNextMajor :: Package.Version -> Constraint
+untilNextMajor :: Version -> Constraint
 untilNextMajor version =
-  Range version LessOrEqual Less (Package.bumpMajor version)
+  Range version LessOrEqual Less (Pkg.bumpMajor version)
 
 
-untilNextMinor :: Package.Version -> Constraint
+untilNextMinor :: Version -> Constraint
 untilNextMinor version =
-  Range version LessOrEqual Less (Package.bumpMinor version)
+  Range version LessOrEqual Less (Pkg.bumpMinor version)
 
 
-expand :: Constraint -> Package.Version -> Constraint
+expand :: Constraint -> Version -> Constraint
 expand constraint@(Range lower lowerOp upperOp upper) version
   | version < lower =
       Range version LessOrEqual upperOp upper
 
   | version > upper =
-      Range lower lowerOp Less (Package.bumpMajor version)
+      Range lower lowerOp Less (Pkg.bumpMajor version)
 
   | otherwise =
       constraint
