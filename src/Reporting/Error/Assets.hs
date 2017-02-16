@@ -24,7 +24,7 @@ import Reporting.Error.Help (reflow)
 
 
 data Error
-  = CorruptProject FilePath (Maybe Json.Error)
+  = BadElmJson FilePath (Maybe Json.Error)
   | CorruptDocumentation String
   | CorruptVersionCache Pkg.Name
   | PackageNotFound Pkg.Name [Pkg.Name]
@@ -52,7 +52,7 @@ data Error
 toDoc :: Error -> Doc
 toDoc err =
   case err of
-    CorruptProject path maybeProblem ->
+    BadElmJson path maybeProblem ->
       case maybeProblem of
         Nothing ->
           Help.makeErrorDoc
@@ -95,7 +95,7 @@ toDoc err =
         ]
 
     CorruptBinary path ->
-      Help.makeErrorDoc "CorruptBinary" [ text "TODO" ]
+      Help.makeErrorDoc "CorruptBinary" [ text $ "TODO " ++ path ]
 
     ModuleNotFound name maybeParent ->
       Help.makeErrorDoc "ModuleNotFound" [ text "TODO" ]
@@ -104,13 +104,13 @@ toDoc err =
       Help.makeErrorDoc "ModuleDuplicates" [ text "TODO" ]
 
     ModuleNameMismatch path expectedName actualName ->
-      Help.makeErrorDoc "ModuleNameMismatch" [ text "TODO" ]
+      Help.makeErrorDoc "ModuleNameMismatch" [ text $ "TODO - " ++ path ]
 
     UnpublishablePorts path name ->
-      Help.makeErrorDoc "UnpublishablePorts" [ text "TODO" ]
+      Help.makeErrorDoc "UnpublishablePorts" [ text $ "TODO - " ++ path ]
 
     UnpublishableEffects path name ->
-      Help.makeErrorDoc "UnpublishableEffects" [ text "TODO" ]
+      Help.makeErrorDoc "UnpublishableEffects" [ text $ "TODO - " ++ path ]
 
 
 getJsonErrorInfo :: Json.Error -> String -> (String, Aeson.Value, String)

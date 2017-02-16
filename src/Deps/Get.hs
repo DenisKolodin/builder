@@ -90,8 +90,8 @@ info name version =
 
         Right (Project.App _) ->
           do  IO.remove elmJson
-              Task.throw $ Error.Assets $ E.CorruptProject elmJson Nothing
+              Task.throw $ Error.Assets $ E.BadElmJson elmJson Nothing
 
         Left err ->
           do  IO.remove elmJson
-              Task.throw $ Error.Assets $ E.CorruptProject elmJson err
+              Task.throw $ Error.Assets $ E.BadElmJson elmJson err
