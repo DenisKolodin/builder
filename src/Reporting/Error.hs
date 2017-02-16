@@ -35,8 +35,7 @@ data Error
   = Assets AssetsError.Error
 
   -- deps
-  | ElmVersionMismatch Constraint
-  | ConstraintsHaveNoSolution [Hint]
+  | NoSolution [Name]
 
   -- misc
   | HttpRequestFailed String String
@@ -101,27 +100,6 @@ toDoc err =
     BadCompile file source errors ->
       Help.makeErrorDoc "Bad compile" [text file, text "TODO"]
 
-    ElmVersionMismatch constraint ->
-      Help.makeErrorDoc
-        ( "You are using Elm " ++ Pkg.versionToString Compiler.version
-          ++ ", but this project is saying it needs a version in this range: "
-          ++ C.toString constraint
-        )
-        ( map reflow $
-            if error "TODO - ElmVersionMismatch" then
-              [ "This means this package has not been upgraded for the newer version of Elm yet.\
-                \ Check out the upgrade docs for guidance on how to get things working again:\
-                \ <https://github.com/elm-lang/elm-platform/tree/master/upgrade-docs>"
-              ]
-            else
-              [ "This means the package is written for a newer version of Elm. The best route\
-                \ is to just download the new Elm version! <http://elm-lang.org/install>"
-              , "If you cannot upgrade for some reason, you can install different versions at\
-                \ the same time with npm. I switch between versions by changing my PATH to\
-                \ point at certain binaries, but you can do it however you want."
-              ]
-        )
-
     HttpRequestFailed url message ->
       Help.makeErrorDoc
         ( "The following HTTP request failed:"
@@ -138,21 +116,8 @@ toDoc err =
         )
         []
 
-    ConstraintsHaveNoSolution hints ->
-      Help.makeErrorDoc "I cannot find a set of packages that works with your constraints." $
-        case hints of
-          [] ->
-            [ reflow $
-                "One way to rebuild your constraints is to clear everything out of\
-                \ the \"dependencies\" field of elm.json and add\
-                \ them back one at a time with `elm-package install`."
-            , reflow $
-                "I hope to automate this in the future, but at least there is\
-                \ a way to make progress for now!"
-            ]
-
-          _ ->
-            [ stack (map hintToBullet hints) ]
+    NoSolution hints ->
+      error "TODO" hints
 
     AddTrickyConstraint name version constraint ->
       Help.makeErrorDoc
