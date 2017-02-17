@@ -12,6 +12,7 @@ import qualified Data.Binary as Binary
 import qualified Data.ByteString.Lazy as BS
 import qualified Data.HashMap.Lazy as HashMap
 import qualified Data.Map as Map
+import qualified Data.Text as Text
 import qualified Network.HTTP.Client as Client
 import qualified Network.HTTP.Client.MultipartFormData as Multi
 
@@ -46,7 +47,23 @@ packageUrl name version filePath =
 
 getNewPackages :: Int -> Task.Task [(Name, Version)]
 getNewPackages index =
-  fetchJson ("all-packages/since/" ++ show index)
+  map _newPkg <$> fetchJson ("all-packages/since/" ++ show index)
+
+
+data NewPkg =
+  NewPkg { _newPkg :: (Name, Version) }
+
+
+instance Json.FromJSON NewPkg where
+  parseJSON =
+    Json.withText "new-package" $ \text ->
+      case Text.splitOn "@" text of
+        [key, value] ->
+          do  name <- Json.parseJSON (Json.String key)
+              vsn <- Json.parseJSON (Json.String value)
+              return (NewPkg (name, vsn))
+        _ ->
+          fail (show text ++ " cannot have multiple @ symbols.")
 
 
 
