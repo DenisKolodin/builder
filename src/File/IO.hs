@@ -1,7 +1,7 @@
 module File.IO
   ( writeBinary, readBinary
   , writeUtf8, readUtf8
-  , remove
+  , remove, exists
   )
   where
 
@@ -108,3 +108,8 @@ remove filePath =
         if exists
           then removeFile filePath
           else return ()
+
+
+exists :: FilePath -> Task.Task Bool
+exists filePath =
+  liftIO $ doesFileExist filePath
