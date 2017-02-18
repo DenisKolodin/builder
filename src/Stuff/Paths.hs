@@ -2,7 +2,6 @@ module Stuff.Paths
   ( dir
   , pkgInfo
   , deps
-  , ifaces
   )
   where
 
@@ -27,9 +26,4 @@ pkgInfo =
 deps :: FilePath
 deps =
   dir </> "deps.dat"
-
-
-ifaces :: FilePath
-ifaces =
-  dir </> "ifaces.dat"
 

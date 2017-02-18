@@ -93,16 +93,18 @@ insertPkg depModules info =
 
 verify :: Project -> Task.Task DepsInfo
 verify project =
-  let
-    safeIsValid =
-      Task.try False $
-        do  cacheProject <- IO.readBinary Path.pkgInfo
-            return (isValid cacheProject project)
-  in
-    do  valid <- safeIsValid
-        if valid
-          then IO.readBinary Path.deps
-          else rebuildCache project
+  do  exists1 <- IO.exists Path.pkgInfo
+      exists2 <- IO.exists Path.deps
+      if not exists1 || not exists2
+        then
+          rebuildCache project
+
+        else
+          do  cacheProject <- IO.readBinary Path.pkgInfo
+              let valid = isValid cacheProject project
+              if valid
+                then IO.readBinary Path.deps
+                else rebuildCache project
 
 
 
@@ -134,11 +136,8 @@ isValid p1 p2 =
 
 rebuildCache :: Project -> Task.Task DepsInfo
 rebuildCache project =
-  do  -- get rid of cached information
-      -- TODO build artifacts too?
-      IO.remove Path.pkgInfo
+  do  IO.remove Path.pkgInfo
       IO.remove Path.deps
-      IO.remove Path.ifaces
 
       Verify.verify project
 
