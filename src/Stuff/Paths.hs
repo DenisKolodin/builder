@@ -2,11 +2,16 @@ module Stuff.Paths
   ( dir
   , pkgInfo
   , deps
+  , elmi
+  , elmo
   )
   where
 
 
-import System.FilePath ((</>))
+import qualified Data.Text as Text
+import System.FilePath ((</>), (<.>))
+
+import Elm.Compiler.Module as Module
 
 
 
@@ -27,3 +32,16 @@ deps :: FilePath
 deps =
   dir </> "deps.dat"
 
+
+
+-- ELMI and ELMO
+
+
+elmi :: Module.Raw -> FilePath
+elmi name =
+  dir </> Text.unpack (Module.hyphenate name) <.> "elmi"
+
+
+elmo :: Module.Raw -> FilePath
+elmo name =
+  dir </> Text.unpack (Module.hyphenate name) <.> "elmo"
