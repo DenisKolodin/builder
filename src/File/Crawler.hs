@@ -32,7 +32,7 @@ import qualified Stuff.Info as Stuff
 
 data Graph =
   Graph
-    { _modules :: Map.Map Module.Raw Node
+    { _locals :: Map.Map Module.Raw Node
     , _natives :: Map.Map Module.Raw FilePath
     , _foreigns :: Map.Map Module.Raw Package
     }
@@ -128,9 +128,6 @@ dfsFromProject root project depsInfo permissions =
 
 
 
-
-
-
 -- DEPTH FIRST SEARCH
 
 
@@ -148,7 +145,7 @@ dfs env unvisited graph =
       return graph
 
     next : rest ->
-      if Map.member (_name next) (_modules graph) then
+      if Map.member (_name next) (_locals graph) then
         dfs env rest graph
 
       else
@@ -166,7 +163,7 @@ dfsHelp env (Unvisited maybeParent name) unvisited graph =
           do  (_, node, newUnvisited) <- readDeps env (Just name) filePath
 
               dfs env (newUnvisited ++ unvisited) $
-                graph { _modules = Map.insert name node (_modules graph) }
+                graph { _locals = Map.insert name node (_locals graph) }
 
         ([JS filePath], Nothing) ->
             dfs env unvisited $
