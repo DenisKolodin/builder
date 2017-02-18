@@ -1,7 +1,7 @@
 {-# OPTIONS_GHC -Wall -fno-warn-unused-do-bind #-}
 {-# LANGUAGE OverloadedStrings #-}
 module Reporting.Task
-  ( Task, run, throw, try
+  ( Task, run, throw
   , Env
   , getPackageCacheDir
   , getPackageCacheDirFor
@@ -63,11 +63,6 @@ run reporter task =
 throw :: Error.Error -> Task a
 throw =
   throwError
-
-
-try :: a -> Task a -> Task a
-try recover task =
-  catchError task (\_ -> return recover)
 
 
 
