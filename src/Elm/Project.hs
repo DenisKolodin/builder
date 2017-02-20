@@ -21,12 +21,10 @@ import qualified Data.Map as Map
 import qualified Data.Set as Set
 import Data.Map (Map)
 
-import qualified Elm.Compiler as Compiler
 import qualified Elm.Compiler.Module as Module
 import Elm.Package (Name, Version)
 
 import Elm.Project.Internal
-import qualified Elm.Project.Constraint as C
 import qualified Reporting.Error as Error
 import qualified Reporting.Error.Assets as E
 import qualified Reporting.Task as Task
