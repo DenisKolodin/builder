@@ -102,13 +102,13 @@ report progress =
 -- THREAD POOL
 
 
-pool :: Int -> (a -> Task_ x b) -> Task_ e (Chan a, Chan (Either x b))
-pool size callback =
+pool :: (a -> Task_ x b) -> Task_ e (Chan a, Chan (Either x b))
+pool callback =
   do  env <- ask
       incoming <- liftIO newChan
       outgoing <- liftIO newChan
 
-      liftIO $ replicateM_ size $ forkIO $
+      liftIO $ replicateM_ (_maxThreads env) $ forkIO $
         do  a <- readChan incoming
             b <- runReaderT (runExceptT (callback a)) env
             writeChan outgoing b

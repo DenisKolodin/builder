@@ -94,7 +94,7 @@ data Permissions
 
 dfs :: Env -> [Unvisited] -> Task.Task Graph
 dfs env unvisited =
-  do  (input, output) <- Task.pool 4 (worker env)
+  do  (input, output) <- Task.pool (worker env)
 
       graph <-
         liftIO $
