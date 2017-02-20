@@ -1,19 +1,21 @@
 {-# OPTIONS_GHC -Wall -fno-warn-unused-do-bind #-}
 {-# LANGUAGE OverloadedStrings #-}
 module Reporting.Task
-  ( Task, run, throw
+  ( Task, Task_, run, throw
   , Env
   , getPackageCacheDir
   , getPackageCacheDirFor
   , report
-  , interleave
+  , pool
   , fetch, makeUrl
   )
   where
 
 import qualified Control.Exception as E
-import Control.Concurrent.ParallelIO.Local (withPool, parallelInterleaved)
-import Control.Monad.Except (ExceptT, runExceptT, catchError, throwError)
+import Control.Concurrent (forkIO)
+import Control.Concurrent.Chan (Chan, newChan, readChan, writeChan)
+import Control.Monad (replicateM_)
+import Control.Monad.Except (ExceptT, runExceptT, throwError)
 import Control.Monad.Reader (ReaderT, runReaderT, ask, asks)
 import Control.Monad.Trans (liftIO)
 import qualified Data.ByteString.Char8 as BSC
@@ -39,12 +41,16 @@ import qualified Reporting.Progress as Progress
 
 
 type Task =
-  ExceptT Error.Error (ReaderT Env IO)
+  Task_ Error.Error
+
+
+type Task_ e =
+  ExceptT e (ReaderT Env IO)
 
 
 data Env =
   Env
-    { _maxConcurrentDownloads :: Int
+    { _maxThreads :: Int
     , _cacheDir :: FilePath
     , _httpManager :: Http.Manager
     , _reporter :: Progress.Reporter
@@ -60,7 +66,7 @@ run reporter task =
         runReaderT (runExceptT task) env
 
 
-throw :: Error.Error -> Task a
+throw :: e -> Task_ e a
 throw =
   throwError
 
@@ -69,12 +75,12 @@ throw =
 -- CACHING
 
 
-getPackageCacheDir :: Task FilePath
+getPackageCacheDir :: Task_ e FilePath
 getPackageCacheDir =
   asks _cacheDir
 
 
-getPackageCacheDirFor :: Name -> Version -> Task FilePath
+getPackageCacheDirFor :: Name -> Version -> Task_ e FilePath
 getPackageCacheDirFor name version =
   do  cacheDir <- getPackageCacheDir
       let dir = cacheDir </> Pkg.toFilePath name </> Pkg.versionToString version
@@ -86,7 +92,7 @@ getPackageCacheDirFor name version =
 -- REPORTER
 
 
-report :: Progress.Progress -> Task ()
+report :: Progress.Progress -> Task_ e ()
 report progress =
   do  reporter <- asks _reporter
       liftIO (reporter progress)
@@ -96,16 +102,18 @@ report progress =
 -- THREAD POOL
 
 
-interleave :: [Task a] -> Task [a]
-interleave tasks =
+pool :: Int -> (a -> Task_ x b) -> Task_ e (Chan a, Chan (Either x b))
+pool size callback =
   do  env <- ask
+      incoming <- liftIO newChan
+      outgoing <- liftIO newChan
 
-      eithers <-
-        liftIO $ withPool (_maxConcurrentDownloads env) $ \pool ->
-          parallelInterleaved pool $
-            map (\task -> runReaderT (runExceptT task) env) tasks
+      liftIO $ replicateM_ size $ forkIO $
+        do  a <- readChan incoming
+            b <- runReaderT (runExceptT (callback a)) env
+            writeChan outgoing b
 
-      either throwError return (sequence eithers)
+      return (incoming, outgoing)
 
 
 

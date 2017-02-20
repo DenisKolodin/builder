@@ -11,7 +11,6 @@ import qualified Data.Text as Text
 import Text.PrettyPrint.ANSI.Leijen
   ( Doc, (<+>), (<>), dullyellow, fillSep, green, indent, text, vcat )
 
-import qualified Elm.Compiler.Module as Module
 import qualified Elm.Package as Pkg
 
 import qualified Utils.Json as Json
@@ -29,20 +28,6 @@ data Error
   | CorruptVersionCache Pkg.Name
   | PackageNotFound Pkg.Name [Pkg.Name]
   | CorruptBinary FilePath
-  | ModuleNotFound Module.Raw (Maybe Module.Raw)
-  | ModuleDuplicates
-      { _name :: Module.Raw
-      , _parent :: Maybe Module.Raw
-      , _local :: [FilePath]
-      , _foreign :: [Pkg.Name]
-      }
-  | ModuleNameMismatch
-      { _path :: FilePath
-      , _expectedName :: Module.Raw
-      , _actualName :: Module.Raw
-      }
-  | UnpublishablePorts FilePath Module.Raw
-  | UnpublishableEffects FilePath Module.Raw
 
 
 
@@ -96,21 +81,6 @@ toDoc err =
 
     CorruptBinary path ->
       Help.makeErrorDoc "CorruptBinary" [ text $ "TODO " ++ path ]
-
-    ModuleNotFound name maybeParent ->
-      Help.makeErrorDoc "ModuleNotFound" [ text "TODO" ]
-
-    ModuleDuplicates name parent local foreign ->
-      Help.makeErrorDoc "ModuleDuplicates" [ text "TODO" ]
-
-    ModuleNameMismatch path expectedName actualName ->
-      Help.makeErrorDoc "ModuleNameMismatch" [ text $ "TODO - " ++ path ]
-
-    UnpublishablePorts path name ->
-      Help.makeErrorDoc "UnpublishablePorts" [ text $ "TODO - " ++ path ]
-
-    UnpublishableEffects path name ->
-      Help.makeErrorDoc "UnpublishableEffects" [ text $ "TODO - " ++ path ]
 
 
 getJsonErrorInfo :: Json.Error -> String -> (String, Aeson.Value, String)

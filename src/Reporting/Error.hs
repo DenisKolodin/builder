@@ -10,6 +10,7 @@ module Reporting.Error
 
 import Data.Text (Text)
 import qualified Data.List as List
+import qualified Data.Map as Map
 import Text.PrettyPrint.ANSI.Leijen
   ( Doc, (<+>), align, dullred, dullyellow
   , fillSep, indent, red, text, vcat
@@ -17,12 +18,14 @@ import Text.PrettyPrint.ANSI.Leijen
 
 import qualified Elm.Assets as Assets
 import qualified Elm.Compiler as Compiler
+import qualified Elm.Compiler.Module as Module
 import qualified Elm.Package as Pkg
 import Elm.Package (Name, Version)
 
 import Elm.Project.Constraint (Constraint)
 import qualified Elm.Project.Constraint as C
-import qualified Reporting.Error.Assets as AssetsError
+import qualified Reporting.Error.Assets as Asset
+import qualified Reporting.Error.Crawler as Crawler
 import qualified Reporting.Error.Help as Help
 import Reporting.Error.Help (reflow, stack)
 
@@ -32,7 +35,8 @@ import Reporting.Error.Help (reflow, stack)
 
 
 data Error
-  = Assets AssetsError.Error
+  = Assets Asset.Error
+  | Crawler (Map.Map Module.Raw Crawler.Problem)
 
   -- verify
   | AppBadElm Version
@@ -98,7 +102,22 @@ toDoc :: Error -> Doc
 toDoc err =
   case err of
     Assets assetError ->
-      AssetsError.toDoc assetError
+      Asset.toDoc assetError
+
+    Crawler crawlerError ->
+      error "TODO crawlerError"
+
+    AppBadElm version ->
+      error ("TODO AppBadElm - " ++ Pkg.versionToString version)
+
+    AppBadDeps ->
+      error "TODO AppBadDeps"
+
+    PkgBadElm _constraint ->
+      error "TODO PkgBadElm"
+
+    PkgBadDeps ->
+      error "TODO PkgBadDeps"
 
     BadCompile file source errors ->
       Help.makeErrorDoc "Bad compile" [text file, text "TODO"]

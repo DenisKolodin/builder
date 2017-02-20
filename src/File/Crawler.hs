@@ -2,26 +2,29 @@
 {-# LANGUAGE OverloadedStrings #-}
 module File.Crawler
   ( Graph(..), Node(..)
-  , dfsFromFiles, dfsFromProject
+  , crawlProject
   , Permissions(..)
   )
   where
 
+import Control.Concurrent.Chan (Chan, readChan, writeChan)
+import Control.Monad (forM_)
 import Control.Monad.Except (liftIO)
 import qualified Data.Map as Map
+import qualified Data.Maybe as Maybe
 import qualified Data.Text as Text
 import System.Directory (doesFileExist)
 import System.FilePath ((</>), (<.>))
 
 import qualified Elm.Compiler as Compiler
 import qualified Elm.Compiler.Module as Module
-import Elm.Package (Name, Package)
+import qualified Elm.Package as Pkg
 
 import Elm.Project (Project)
 import qualified Elm.Project as Project
-import qualified File.IO as File
+import qualified File.IO as IO
 import qualified Reporting.Error as Error
-import qualified Reporting.Error.Assets as E
+import qualified Reporting.Error.Crawler as E
 import qualified Reporting.Task as Task
 import qualified Stuff.Info as Stuff
 
@@ -34,7 +37,8 @@ data Graph =
   Graph
     { _locals :: Map.Map Module.Raw Node
     , _natives :: Map.Map Module.Raw FilePath
-    , _foreigns :: Map.Map Module.Raw Package
+    , _foreigns :: Map.Map Module.Raw Pkg.Name
+    , _problems :: Map.Map Module.Raw E.Problem
     }
 
 
@@ -45,8 +49,28 @@ data Node =
     }
 
 
+empty :: Graph
+empty =
+  Graph Map.empty Map.empty Map.empty Map.empty
 
--- STATE and ENVIRONMENT
+
+
+-- CRAWL PROJECT
+
+
+crawlProject :: FilePath -> Project -> Stuff.DepsInfo -> Permissions -> Task.Task Graph
+crawlProject root project depsInfo permissions =
+  let
+    environment =
+      Env
+        { _srcDirs = [ root </> Project.toSourceDir project ]
+        , _depModules = Stuff.getDepModules project depsInfo
+        , _permissions = permissions
+        , _native = Project.toNative project
+      }
+  in
+    dfs environment $
+      map (Unvisited Nothing) (Project.toRoots project)
 
 
 data Env =
@@ -54,7 +78,6 @@ data Env =
     { _srcDirs :: [FilePath]
     , _depModules :: Stuff.DepModules
     , _permissions :: Permissions
-    , _pkgName :: Maybe Name
     , _native :: Bool
     }
 
@@ -65,70 +88,70 @@ data Permissions
   | None
 
 
-initEnv :: FilePath -> Project -> Stuff.DepsInfo -> Permissions -> Env
-initEnv root project depsInfo permissions =
-  Env
-    [ root </> Project.toSourceDir project ]
-    (Stuff.getDepModules project depsInfo)
-    permissions
-    (Project.toName project)
-    (Project.toNative project)
-
-
-
--- GENERIC CRAWLER
-
-
-dfsFromFiles
-  :: FilePath
-  -> Project
-  -> Stuff.DepsInfo
-  -> Permissions
-  -> [FilePath]
-  -> Task.Task ([Module.Raw], Graph)
-dfsFromFiles root project depsInfo permissions filePaths =
-  do  let env = initEnv root project depsInfo permissions
-
-      info <- traverse (readDeps env Nothing) filePaths
-
-      let step (name, node, nexts) (names, unvisited, nodes) =
-            ( name : names
-            , nexts ++ unvisited
-            , Map.insert name node nodes
-            )
-
-      let (names, unvisited, nodes) =
-            foldr step ([], [], Map.empty) info
-
-      let initialGraph = Graph nodes Map.empty Map.empty
-
-      graph <- dfs env unvisited initialGraph
-
-      return (names, graph)
-
-
-dfsFromProject
-  :: FilePath
-  -> Project
-  -> Stuff.DepsInfo
-  -> Permissions
-  -> Task.Task Graph
-dfsFromProject root project depsInfo permissions =
-  let
-    unvisited =
-      map (Unvisited Nothing) (Project.toRoots project)
-
-    env =
-      initEnv root project depsInfo permissions
-
-    initialGraph =
-      Graph Map.empty Map.empty Map.empty
-  in
-    dfs env unvisited initialGraph
-
-
 
 -- DEPTH FIRST SEARCH
+
+
+dfs :: Env -> [Unvisited] -> Task.Task Graph
+dfs env unvisited =
+  do  (input, output) <- Task.pool 4 (worker env)
+
+      graph <-
+        liftIO $
+          do  mapM_ (writeChan input) unvisited
+              dfsHelp env input output (length unvisited) empty
+
+      if Map.null (_problems graph)
+        then return graph
+        else Task.throw (Error.Crawler (_problems graph))
+
+
+dfsHelp :: Env -> Chan Unvisited -> Chan (Either E.Error Asset) -> Int -> Graph -> IO Graph
+dfsHelp env input output pendingWork graph =
+  if pendingWork == 0 then
+    return graph
+
+  else
+    do  asset <- readChan output
+        case asset of
+          Right (Local name node) ->
+            do  let locals = Map.insert name node (_locals graph)
+                let newGraph = graph { _locals = locals }
+                let deps = filter (isNew newGraph) (_deps node)
+                forM_ deps $ \dep ->
+                  writeChan input (Unvisited (Just name) dep)
+                let newPending = pendingWork - 1 + length deps
+                dfsHelp env input output newPending newGraph
+
+          Right (Native name path) ->
+            do  let natives = Map.insert name path (_natives graph)
+                let newGraph = graph { _natives = natives }
+                let newPending = pendingWork - 1
+                dfsHelp env input output newPending newGraph
+
+          Right (Foreign name pkg) ->
+            do  let foreigns = Map.insert name pkg (_foreigns graph)
+                let newGraph = graph { _foreigns = foreigns }
+                let newPending = pendingWork - 1
+                dfsHelp env input output newPending newGraph
+
+          Left (E.Error name problem) ->
+            do  let problems = Map.insert name problem (_problems graph)
+                let newGraph = graph { _problems = problems }
+                let newPending = pendingWork - 1
+                dfsHelp env input output newPending newGraph
+
+
+isNew :: Graph -> Module.Raw -> Bool
+isNew (Graph locals natives foreigns problems) name =
+  Map.notMember name locals
+  && Map.notMember name natives
+  && Map.notMember name foreigns
+  && Map.notMember name problems
+
+
+
+-- DFS WORKER
 
 
 data Unvisited =
@@ -138,55 +161,44 @@ data Unvisited =
     }
 
 
-dfs :: Env -> [Unvisited] -> Graph -> Task.Task Graph
-dfs env unvisited graph =
-  case unvisited of
-    [] ->
-      return graph
-
-    next : rest ->
-      if Map.member (_name next) (_locals graph) then
-        dfs env rest graph
-
-      else
-        dfsHelp env next rest graph
+data Asset
+  = Local Module.Raw Node
+  | Native Module.Raw FilePath
+  | Foreign Module.Raw Pkg.Name
 
 
-dfsHelp :: Env -> Unvisited -> [Unvisited] -> Graph -> Task.Task Graph
-dfsHelp env (Unvisited maybeParent name) unvisited graph =
-  do  -- find all paths that match the unvisited module name
-      filePaths <- find (_native env) name (_srcDirs env)
+type CTask a = Task.Task_ E.Error a
 
-      -- see if we found a unique path for the name
+
+worker :: Env -> Unvisited -> CTask Asset
+worker env (Unvisited maybeParent name) =
+  do
+      filePaths <- liftIO $ find (_native env) name (_srcDirs env)
+
       case (filePaths, Map.lookup name (_depModules env)) of
         ([Elm filePath], Nothing) ->
-          do  (_, node, newUnvisited) <- readDeps env (Just name) filePath
-
-              dfs env (newUnvisited ++ unvisited) $
-                graph { _locals = Map.insert name node (_locals graph) }
+            readValidHeader env name filePath
 
         ([JS filePath], Nothing) ->
-            dfs env unvisited $
-              graph { _natives = Map.insert name filePath (_natives graph) }
+            return (Native name filePath)
 
-        ([], Just [pkg]) ->
-            dfs env unvisited $
-              graph { _foreigns = Map.insert name pkg (_foreigns graph) }
+        ([], Just [(pkg, _vsn)]) ->
+            return (Foreign name pkg)
 
         ([], Nothing) ->
-            throw (E.ModuleNotFound name maybeParent)
+            throw name (E.ModuleNotFound maybeParent)
 
         (_, maybePkgs) ->
           let
             locals = map toFilePath filePaths
             foreigns = maybe [] (map fst) maybePkgs
           in
-            throw $ E.ModuleDuplicates name maybeParent locals foreigns
+            throw name (E.ModuleDuplicates maybeParent locals foreigns)
 
 
-throw :: E.Error -> Task.Task a
-throw assetsError =
-  Task.throw (Error.Assets assetsError)
+throw :: Module.Raw -> E.Problem -> CTask a
+throw name problem =
+  Task.throw (E.Error name problem)
 
 
 
@@ -199,95 +211,79 @@ data CodePath = Elm FilePath | JS FilePath
 toFilePath :: CodePath -> FilePath
 toFilePath codePath =
   case codePath of
-    Elm file -> file
-    JS file -> file
+    Elm path ->
+      path
+
+    JS path ->
+      path
 
 
-find :: Bool -> Module.Raw -> [FilePath] -> Task.Task [CodePath]
-find allowsNative moduleName sourceDirs =
-    findHelp allowsNative [] moduleName sourceDirs
+find :: Bool -> Module.Raw -> [FilePath] -> IO [CodePath]
+find allowsNative name srcDirs =
+  do  elm <- mapM (elmExists name) srcDirs
+      js <- if allowsNative then mapM (jsExists name) srcDirs else return []
+      return (Maybe.catMaybes (js ++ elm))
 
 
-findHelp :: Bool -> [CodePath] -> Module.Raw -> [FilePath] -> Task.Task [CodePath]
-findHelp _allowsNative locations _moduleName [] =
-  return locations
+elmExists :: Module.Raw -> FilePath -> IO (Maybe CodePath)
+elmExists name srcDir =
+  do  let path = srcDir </> Module.nameToPath name <.> "elm"
+      exists <- doesFileExist path
+      return $ if exists then Just (Elm path) else Nothing
 
-findHelp allowsNative locations moduleName (dir:srcDirs) =
-  do  locations' <- addElmPath locations
-      updatedLocations <-
-          if allowsNative then addJsPath locations' else return locations'
-      findHelp allowsNative updatedLocations moduleName srcDirs
-  where
-    consIf bool x xs =
-        if bool then x:xs else xs
 
-    addElmPath locs =
-      do  let elmPath = dir </> Module.nameToPath moduleName <.> "elm"
-          elmExists <- liftIO (doesFileExist elmPath)
-          return (consIf elmExists (Elm elmPath) locs)
-
-    addJsPath locs =
-      do  let jsPath = dir </> Module.nameToPath moduleName <.> "js"
-          jsExists <-
-              if Text.isPrefixOf "Native." moduleName then
-                liftIO (doesFileExist jsPath)
-              else
-                return False
-
-          return (consIf jsExists (JS jsPath) locs)
+jsExists :: Module.Raw -> FilePath -> IO (Maybe CodePath)
+jsExists name srcDir =
+  if not (Text.isPrefixOf "Native." name)
+    then return Nothing
+    else
+      do  let path = srcDir </> Module.nameToPath name <.> "js"
+          exists <- doesFileExist path
+          return $ if exists then Just (JS path) else Nothing
 
 
 
 -- READ DEPENDENCIES
 
 
-readDeps
-  :: Env
-  -> Maybe Module.Raw
-  -> FilePath
-  -> Task.Task (Module.Raw, Node, [Unvisited])
-readDeps env maybeName filePath =
-  do  source <- liftIO (File.readUtf8 filePath)
+readValidHeader :: Env -> Module.Raw -> FilePath -> CTask Asset
+readValidHeader env expectedName filePath =
+  do  source <- liftIO (IO.readUtf8 filePath)
 
       (tag, name, deps) <-
-        case Compiler.parseDependencies (_pkgName env) source of
+        case Compiler.parseDependencies (error "TODO") source of
           Right result ->
             return result
 
           Left msg ->
-            Task.throw (Error.BadCompile filePath source [msg])
+            throw expectedName (E.BadHeader filePath msg)
 
-      checkName filePath name maybeName
+      checkName filePath expectedName name
       checkTag filePath name (_permissions env) tag
 
-      return
-        ( name
-        , Node filePath deps
-        , map (Unvisited (Just name)) deps
-        )
+      return (Local name (Node filePath deps))
 
 
-checkName :: FilePath -> Module.Raw -> Maybe Module.Raw -> Task.Task ()
-checkName path nameFromSource maybeName =
-  case maybeName of
-    Just nameFromPath | nameFromSource /= nameFromPath ->
-      throw (E.ModuleNameMismatch path nameFromPath nameFromSource)
+checkName :: FilePath -> Module.Raw -> Module.Raw -> CTask ()
+checkName path expectedName actualName =
+  if expectedName == actualName then
+    return ()
 
-    _ ->
-      return ()
+  else
+    throw expectedName (E.ModuleNameMismatch path actualName)
 
 
-checkTag :: FilePath -> Module.Raw -> Permissions -> Compiler.Tag -> Task.Task ()
+checkTag :: FilePath -> Module.Raw -> Permissions -> Compiler.Tag -> CTask ()
 checkTag filePath name permissions tag =
   case (permissions, tag) of
     (PortsAndEffects, _) ->
       return ()
 
     (_, Compiler.Port) ->
-      throw (E.UnpublishablePorts filePath name)
+      throw name (E.UnpublishablePorts filePath)
 
     (None, Compiler.Effect)  ->
-      throw (E.UnpublishableEffects filePath name)
+      throw name (E.UnpublishableEffects filePath)
 
     (_, _) ->
       return ()
