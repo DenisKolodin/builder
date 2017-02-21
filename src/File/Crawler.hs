@@ -11,10 +11,7 @@ import Control.Concurrent.Chan (Chan, readChan, writeChan)
 import Control.Monad (forM_)
 import Control.Monad.Except (liftIO)
 import qualified Data.Map as Map
-import qualified Data.Maybe as Maybe
-import qualified Data.Text as Text
-import System.Directory (doesFileExist)
-import System.FilePath ((</>), (<.>))
+import System.FilePath ((</>))
 
 import qualified Elm.Compiler as Compiler
 import qualified Elm.Compiler.Module as Module
@@ -22,6 +19,7 @@ import qualified Elm.Package as Pkg
 
 import Elm.Project (Project)
 import qualified Elm.Project as Project
+import qualified File.Find as Find
 import qualified File.IO as IO
 import qualified Reporting.Error as Error
 import qualified Reporting.Error.Crawler as E
@@ -173,13 +171,13 @@ type CTask a = Task.Task_ E.Error a
 worker :: Env -> Unvisited -> CTask Asset
 worker env (Unvisited maybeParent name) =
   do
-      filePaths <- liftIO $ find (_native env) name (_srcDirs env)
+      filePaths <- liftIO $ Find.find (_native env) name (_srcDirs env)
 
       case (filePaths, Map.lookup name (_depModules env)) of
-        ([Elm filePath], Nothing) ->
+        ([Find.Elm filePath], Nothing) ->
             readValidHeader env name filePath
 
-        ([JS filePath], Nothing) ->
+        ([Find.JS filePath], Nothing) ->
             return (Native name filePath)
 
         ([], Just [(pkg, _vsn)]) ->
@@ -190,7 +188,7 @@ worker env (Unvisited maybeParent name) =
 
         (_, maybePkgs) ->
           let
-            locals = map toFilePath filePaths
+            locals = map Find.toFilePath filePaths
             foreigns = maybe [] (map fst) maybePkgs
           in
             throw name (E.ModuleDuplicates maybeParent locals foreigns)
@@ -199,47 +197,6 @@ worker env (Unvisited maybeParent name) =
 throw :: Module.Raw -> E.Problem -> CTask a
 throw name problem =
   Task.throw (E.Error name problem)
-
-
-
--- FIND LOCAL FILE PATH
-
-
-data CodePath = Elm FilePath | JS FilePath
-
-
-toFilePath :: CodePath -> FilePath
-toFilePath codePath =
-  case codePath of
-    Elm path ->
-      path
-
-    JS path ->
-      path
-
-
-find :: Bool -> Module.Raw -> [FilePath] -> IO [CodePath]
-find allowsNative name srcDirs =
-  do  elm <- mapM (elmExists name) srcDirs
-      js <- if allowsNative then mapM (jsExists name) srcDirs else return []
-      return (Maybe.catMaybes (js ++ elm))
-
-
-elmExists :: Module.Raw -> FilePath -> IO (Maybe CodePath)
-elmExists name srcDir =
-  do  let path = srcDir </> Module.nameToPath name <.> "elm"
-      exists <- doesFileExist path
-      return $ if exists then Just (Elm path) else Nothing
-
-
-jsExists :: Module.Raw -> FilePath -> IO (Maybe CodePath)
-jsExists name srcDir =
-  if not (Text.isPrefixOf "Native." name)
-    then return Nothing
-    else
-      do  let path = srcDir </> Module.nameToPath name <.> "js"
-          exists <- doesFileExist path
-          return $ if exists then Just (JS path) else Nothing
 
 
 
