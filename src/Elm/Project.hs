@@ -8,9 +8,9 @@ module Elm.Project
   , toSolution
   , isSameSolution
 
-  , toName
-  , toSourceDir, toNative
-  , toRoots
+  , getName
+  , getSourceDir, getNative
+  , getRoots
   )
   where
 
@@ -99,8 +99,8 @@ isSameSolution solution (TransitiveDeps a b c d) =
 -- REPO
 
 
-toName :: Project -> Maybe Name
-toName project =
+getName :: Project -> Maybe Name
+getName project =
   destruct (const Nothing) (Just . _pkg_name) project
 
 
@@ -108,13 +108,13 @@ toName project =
 -- EXTRACT INFORMARION
 
 
-toSourceDir :: Project -> FilePath
-toSourceDir project =
+getSourceDir :: Project -> FilePath
+getSourceDir project =
   destruct _app_source_dir (const "src") project
 
 
-toNative :: Project -> Bool
-toNative project =
+getNative :: Project -> Bool
+getNative project =
   destruct (const False) _pkg_natives project
 
 
@@ -128,7 +128,7 @@ destruct appFunc pkgFunc project =
       pkgFunc info
 
 
-toRoots :: Project -> [Module.Raw]
-toRoots project =
+getRoots :: Project -> [Module.Raw]
+getRoots project =
   destruct _app_pages _pkg_exposed project
 

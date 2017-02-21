@@ -63,14 +63,14 @@ crawlProject root project depsInfo permissions =
   let
     environment =
       Env
-        { _srcDirs = [ root </> Project.toSourceDir project ]
+        { _srcDirs = [ root </> Project.getSourceDir project ]
         , _depModules = Stuff.getDepModules project depsInfo
         , _permissions = permissions
-        , _native = Project.toNative project
+        , _native = Project.getNative project
       }
   in
     dfs environment $
-      map (Unvisited Nothing) (Project.toRoots project)
+      map (Unvisited Nothing) (Project.getRoots project)
 
 
 data Env =
