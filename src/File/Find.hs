@@ -1,18 +1,66 @@
 {-# OPTIONS_GHC -Wall #-}
 {-# LANGUAGE OverloadedStrings #-}
 module File.Find
-  ( CodePath(..)
-  , toFilePath
+  ( Asset(..)
   , find
   )
   where
 
+import Control.Monad.Except (liftIO)
+import qualified Data.Map as Map
 import qualified Data.Maybe as Maybe
 import qualified Data.Text as Text
 import System.Directory (doesFileExist)
 import System.FilePath ((</>), (<.>))
 
 import qualified Elm.Compiler.Module as Module
+import qualified Elm.Package as Pkg
+
+import Elm.Project (Project)
+import qualified Elm.Project as Project
+import qualified Reporting.Error.Find as E
+import qualified Reporting.Task as Task
+import qualified Stuff.Info as Info
+
+
+
+-- ASSET
+
+
+data Asset
+  = Local FilePath
+  | Native FilePath
+  | Foreign Pkg.Name
+
+
+
+-- FIND
+
+
+find :: FilePath -> Project -> Info.DepModules -> Module.Raw -> Task.Task_ E.Error Asset
+find root project depModules name =
+  do
+      codePaths <- liftIO $ getCodePaths root project name
+
+      case (codePaths, Map.lookup name depModules) of
+        ([Elm path], Nothing) ->
+            return (Local path)
+
+        ([JS path], Nothing) ->
+            return (Native path)
+
+        ([], Just [(pkg, _vsn)]) ->
+            return (Foreign pkg)
+
+        ([], Nothing) ->
+            Task.throw E.NotFound
+
+        (_, maybePkgs) ->
+          let
+            locals = map toFilePath codePaths
+            foreigns = maybe [] (map fst) maybePkgs
+          in
+            Task.throw (E.Duplicates locals foreigns)
 
 
 
@@ -35,14 +83,16 @@ toFilePath codePath =
 
 
 
--- FIND
+-- GET CODE PATHS
 
 
-find :: Bool -> Module.Raw -> [FilePath] -> IO [CodePath]
-find allowsNative name srcDirs =
-  do  elm <- mapM (elmExists name) srcDirs
+getCodePaths :: FilePath -> Project -> Module.Raw -> IO [CodePath]
+getCodePaths root project name =
+  do  let srcDirs = [root </> Project.getSourceDir project]
+      let allowNative = Project.getNative project
+      elm <- mapM (elmExists name) srcDirs
       Maybe.catMaybes <$>
-        if allowsNative && Text.isPrefixOf "Native." name then
+        if allowNative && Text.isPrefixOf "Native." name then
           (++ elm) <$> mapM (jsExists name) srcDirs
         else
           return elm
