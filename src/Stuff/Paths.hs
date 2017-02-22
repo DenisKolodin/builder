@@ -1,6 +1,5 @@
 module Stuff.Paths
-  ( dir
-  , pkgInfo
+  ( pkgInfo
   , deps
   , elmi
   , elmo
@@ -11,26 +10,26 @@ module Stuff.Paths
 import qualified Data.Text as Text
 import System.FilePath ((</>), (<.>))
 
-import Elm.Compiler.Module as Module
+import qualified Elm.Compiler.Module as Module
 
 
 
 -- PATHS
 
 
-dir :: FilePath
-dir =
+stuff :: FilePath
+stuff =
   "elm-stuff"
 
 
 pkgInfo :: FilePath
 pkgInfo =
-  dir </> "elm.dat"
+  stuff </> "elm.dat"
 
 
 deps :: FilePath
 deps =
-  dir </> "deps.dat"
+  stuff </> "deps.dat"
 
 
 
@@ -39,9 +38,15 @@ deps =
 
 elmi :: Module.Raw -> FilePath
 elmi name =
-  dir </> Text.unpack (Module.hyphenate name) <.> "elmi"
+  toArtifactPath name "elmi"
 
 
 elmo :: Module.Raw -> FilePath
 elmo name =
-  dir </> Text.unpack (Module.hyphenate name) <.> "elmo"
+  toArtifactPath name "elmo"
+
+
+toArtifactPath :: Module.Raw -> String -> FilePath
+toArtifactPath name ext =
+  stuff </> Text.unpack (Module.hyphenate name) <.> ext
+
