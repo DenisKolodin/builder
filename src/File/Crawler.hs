@@ -3,7 +3,6 @@
 module File.Crawler
   ( Graph(..), Node(..)
   , crawlProject
-  , Permissions(..)
   )
   where
 
@@ -35,8 +34,8 @@ data Graph =
   Graph
     { _locals :: Map.Map Module.Raw Node
     , _natives :: Map.Map Module.Raw FilePath
-    , _foreigns :: Map.Map Module.Raw Pkg.Name
-    , _problems :: Map.Map Module.Raw E.Problem
+    , _foreigns :: Map.Map Module.Raw (Pkg.Name, Pkg.Version)
+    , _problems :: Map.Map Module.Raw E.Error
     }
 
 
@@ -56,16 +55,15 @@ empty =
 -- CRAWL PROJECT
 
 
-crawlProject :: FilePath -> Project -> Stuff.DepsInfo -> Permissions -> Task.Task Graph
-crawlProject root project depsInfo permissions =
+crawlProject :: FilePath -> Project -> Stuff.DepsInfo -> Task.Task Graph
+crawlProject root project depsInfo =
   let
     environment =
       Env
         { _srcDirs = [ root </> Project.getSourceDir project ]
+        , _project = project
         , _depModules = Stuff.getDepModules project depsInfo
-        , _permissions = permissions
-        , _native = Project.getNative project
-      }
+        }
   in
     dfs environment $
       map (Unvisited Nothing) (Project.getRoots project)
@@ -74,16 +72,9 @@ crawlProject root project depsInfo permissions =
 data Env =
   Env
     { _srcDirs :: [FilePath]
+    , _project :: Project
     , _depModules :: Stuff.DepModules
-    , _permissions :: Permissions
-    , _native :: Bool
     }
-
-
-data Permissions
-  = PortsAndEffects
-  | Effects
-  | None
 
 
 
@@ -104,7 +95,13 @@ dfs env unvisited =
         else Task.throw (Error.Crawler (_problems graph))
 
 
-dfsHelp :: Env -> Chan Unvisited -> Chan (Either E.Error Asset) -> Int -> Graph -> IO Graph
+dfsHelp
+  :: Env
+  -> Chan Unvisited
+  -> Chan (Either (Module.Raw, E.Error) Asset)
+  -> Int
+  -> Graph
+  -> IO Graph
 dfsHelp env input output pendingWork graph =
   if pendingWork == 0 then
     return graph
@@ -127,14 +124,14 @@ dfsHelp env input output pendingWork graph =
                 let newPending = pendingWork - 1
                 dfsHelp env input output newPending newGraph
 
-          Right (Foreign name pkg) ->
-            do  let foreigns = Map.insert name pkg (_foreigns graph)
+          Right (Foreign name pkg vsn) ->
+            do  let foreigns = Map.insert name (pkg, vsn) (_foreigns graph)
                 let newGraph = graph { _foreigns = foreigns }
                 let newPending = pendingWork - 1
                 dfsHelp env input output newPending newGraph
 
-          Left (E.Error name problem) ->
-            do  let problems = Map.insert name problem (_problems graph)
+          Left (name, err) ->
+            do  let problems = Map.insert name err (_problems graph)
                 let newGraph = graph { _problems = problems }
                 let newPending = pendingWork - 1
                 dfsHelp env input output newPending newGraph
@@ -162,85 +159,76 @@ data Unvisited =
 data Asset
   = Local Module.Raw Node
   | Native Module.Raw FilePath
-  | Foreign Module.Raw Pkg.Name
+  | Foreign Module.Raw Pkg.Name Pkg.Version
 
 
-type CTask a = Task.Task_ E.Error a
-
-
-worker :: Env -> Unvisited -> CTask Asset
+worker :: Env -> Unvisited -> Task.Task_ (Module.Raw, E.Error) Asset
 worker env (Unvisited maybeParent name) =
-  do
-      filePaths <- liftIO $ Find.find (_native env) name (_srcDirs env)
+  Task.mapError ((,) name) $
+    do  asset <- Find.find "." (_project env) (_depModules env) name
+        case asset of
+          Find.Local path ->
+            readValidHeader env name path
 
-      case (filePaths, Map.lookup name (_depModules env)) of
-        ([Find.Elm filePath], Nothing) ->
-            readValidHeader env name filePath
+          Find.Native path ->
+            return (Native name path)
 
-        ([Find.JS filePath], Nothing) ->
-            return (Native name filePath)
-
-        ([], Just [(pkg, _vsn)]) ->
-            return (Foreign name pkg)
-
-        ([], Nothing) ->
-            throw name (E.ModuleNotFound maybeParent)
-
-        (_, maybePkgs) ->
-          let
-            locals = map Find.toFilePath filePaths
-            foreigns = maybe [] (map fst) maybePkgs
-          in
-            throw name (E.ModuleDuplicates maybeParent locals foreigns)
-
-
-throw :: Module.Raw -> E.Problem -> CTask a
-throw name problem =
-  Task.throw (E.Error name problem)
+          Find.Foreign pkg vsn ->
+            return (Foreign name pkg vsn)
 
 
 
--- READ DEPENDENCIES
+-- READ HEADER
 
 
-readValidHeader :: Env -> Module.Raw -> FilePath -> CTask Asset
-readValidHeader env expectedName filePath =
-  do  source <- liftIO (IO.readUtf8 filePath)
+type HReader a = Task.Task_ E.Error a
+
+
+readValidHeader :: Env -> Module.Raw -> FilePath -> HReader Asset
+readValidHeader env expectedName path =
+  do  source <- liftIO (IO.readUtf8 path)
 
       (tag, name, deps) <-
+        -- TODO get regions on data extracted here
         case Compiler.parseDependencies (error "TODO") source of
           Right result ->
             return result
 
           Left msg ->
-            throw expectedName (E.BadHeader filePath msg)
+            Task.throw (E.BadHeader path msg)
 
-      checkName filePath expectedName name
-      checkTag filePath name (_permissions env) tag
+      checkName path expectedName name
+      checkTag (_project env) path tag
 
-      return (Local name (Node filePath deps))
+      return (Local name (Node path deps))
 
 
-checkName :: FilePath -> Module.Raw -> Module.Raw -> CTask ()
+checkName :: FilePath -> Module.Raw -> Module.Raw -> HReader ()
 checkName path expectedName actualName =
   if expectedName == actualName then
     return ()
 
   else
-    throw expectedName (E.ModuleNameMismatch path actualName)
+    Task.throw (E.BadName path actualName)
 
 
-checkTag :: FilePath -> Module.Raw -> Permissions -> Compiler.Tag -> CTask ()
-checkTag filePath name permissions tag =
-  case (permissions, tag) of
-    (PortsAndEffects, _) ->
+checkTag :: Project -> FilePath -> Compiler.Tag -> HReader ()
+checkTag project path tag =
+  case tag of
+    Compiler.Normal ->
       return ()
 
-    (_, Compiler.Port) ->
-      throw name (E.UnpublishablePorts filePath)
+    Compiler.Port ->
+      case project of
+        Project.App _ ->
+          return ()
 
-    (None, Compiler.Effect)  ->
-      throw name (E.UnpublishableEffects filePath)
+        Project.Pkg _ ->
+          Task.throw (E.PortsInPackage path)
 
-    (_, _) ->
-      return ()
+    Compiler.Effect ->
+      if Project.getEffect project then
+        return ()
+
+      else
+        Task.throw (E.EffectsUnexpected path)

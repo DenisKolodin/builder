@@ -1,7 +1,6 @@
 {-# OPTIONS_GHC -Wall #-}
 module Reporting.Error.Crawler
   ( Error(..)
-  , Problem(..)
   )
   where
 
@@ -16,18 +15,10 @@ import qualified Elm.Package as Pkg
 
 
 data Error
-  = Error Module.Raw Problem
-
-
--- TODO show source code when appropriate
--- Need Elm.Compiler.parseDependencies to produce regions.
-
-
-data Problem
-  = ModuleNotFound (Maybe Module.Raw) -- TODO suggest other names
-  | ModuleDuplicates (Maybe Module.Raw) [FilePath] [Pkg.Name]
-  | ModuleNameMismatch FilePath Module.Raw
-  | UnpublishablePorts FilePath
-  | UnpublishableEffects FilePath
+  = NotFound -- TODO suggest other names
+  | Duplicates [FilePath] [Pkg.Name]
   | BadHeader FilePath Compiler.Error
+  | BadName FilePath Module.Raw
+  | PortsInPackage FilePath
+  | EffectsUnexpected FilePath
 

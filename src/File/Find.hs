@@ -18,7 +18,7 @@ import qualified Elm.Package as Pkg
 
 import Elm.Project (Project)
 import qualified Elm.Project as Project
-import qualified Reporting.Error.Find as E
+import qualified Reporting.Error.Crawler as E
 import qualified Reporting.Task as Task
 import qualified Stuff.Info as Info
 
@@ -30,7 +30,7 @@ import qualified Stuff.Info as Info
 data Asset
   = Local FilePath
   | Native FilePath
-  | Foreign Pkg.Name
+  | Foreign Pkg.Name Pkg.Version
 
 
 
@@ -49,8 +49,8 @@ find root project depModules name =
         ([JS path], Nothing) ->
             return (Native path)
 
-        ([], Just [(pkg, _vsn)]) ->
-            return (Foreign pkg)
+        ([], Just [(pkg, vsn)]) ->
+            return (Foreign pkg vsn)
 
         ([], Nothing) ->
             Task.throw E.NotFound

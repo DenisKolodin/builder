@@ -1,7 +1,7 @@
 {-# OPTIONS_GHC -Wall -fno-warn-unused-do-bind #-}
 {-# LANGUAGE OverloadedStrings #-}
 module Reporting.Task
-  ( Task, Task_, run, throw
+  ( Task, Task_, run, throw, mapError
   , Env
   , getPackageCacheDir
   , getPackageCacheDirFor
@@ -15,7 +15,7 @@ import qualified Control.Exception as E
 import Control.Concurrent (forkIO)
 import Control.Concurrent.Chan (Chan, newChan, readChan, writeChan)
 import Control.Monad (replicateM_)
-import Control.Monad.Except (ExceptT, runExceptT, throwError)
+import Control.Monad.Except (ExceptT, runExceptT, throwError, withExceptT)
 import Control.Monad.Reader (ReaderT, runReaderT, ask, asks)
 import Control.Monad.Trans (liftIO)
 import qualified Data.ByteString.Char8 as BSC
@@ -69,6 +69,11 @@ run reporter task =
 throw :: e -> Task_ e a
 throw =
   throwError
+
+
+mapError :: (x -> y) -> Task_ x a -> Task_ y a
+mapError =
+  withExceptT
 
 
 

@@ -9,7 +9,9 @@ module Elm.Project
   , isSameSolution
 
   , getName
-  , getSourceDir, getNative
+  , getSourceDir
+  , getNative
+  , getEffect
   , getRoots
   )
   where
@@ -22,6 +24,7 @@ import qualified Data.Set as Set
 import Data.Map (Map)
 
 import qualified Elm.Compiler.Module as Module
+import qualified Elm.Package as Pkg
 import Elm.Package (Name, Version)
 
 import Elm.Project.Internal
@@ -99,9 +102,9 @@ isSameSolution solution (TransitiveDeps a b c d) =
 -- REPO
 
 
-getName :: Project -> Maybe Name
+getName :: Project -> Name
 getName project =
-  destruct (const Nothing) (Just . _pkg_name) project
+  destruct (\_ -> Pkg.dummyName) _pkg_name project
 
 
 
@@ -116,6 +119,11 @@ getSourceDir project =
 getNative :: Project -> Bool
 getNative project =
   destruct (const False) _pkg_natives project
+
+
+getEffect :: Project -> Bool
+getEffect project =
+  destruct (const False) _pkg_effects project
 
 
 destruct :: (AppInfo -> a) -> (PkgInfo -> a) -> Project -> a
