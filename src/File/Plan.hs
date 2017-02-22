@@ -3,7 +3,6 @@ module Pipeline.Plan where
 
 import Control.Monad (foldM)
 import Control.Monad.Except (liftIO, throwError)
-import qualified Data.Graph as Graph
 import qualified Data.Set as Set
 import qualified Data.Text as Text
 import Data.Time.Clock (UTCTime)
@@ -201,28 +200,3 @@ filterNativeDeps moduleName@(CanonicalModule _ name) =
     else
       Just moduleName
 
-
-
--- SORT GRAPHS / CHECK FOR CYCLES
-
-
-topologicalSort :: Map.Map CanonicalModule [CanonicalModule] -> BM.Task [CanonicalModule]
-topologicalSort dependencies =
-  let
-    toNode (name, deps) =
-      (name, name, deps)
-
-    components =
-      Graph.stronglyConnComp (map toNode (Map.toList dependencies))
-  in
-    mapM errorOnCycle components
-
-
-errorOnCycle :: Graph.SCC CanonicalModule -> BM.Task CanonicalModule
-errorOnCycle scc =
-  case scc of
-    Graph.AcyclicSCC name ->
-      return name
-
-    Graph.CyclicSCC cycle ->
-      throwError (BM.Cycle cycle)

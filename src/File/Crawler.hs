@@ -1,14 +1,16 @@
 {-# OPTIONS_GHC -Wall #-}
 {-# LANGUAGE OverloadedStrings #-}
 module File.Crawler
-  ( Graph(..), Node(..)
-  , crawlProject
+  ( Graph(..)
+  , Node(..)
+  , crawl
   )
   where
 
 import Control.Concurrent.Chan (Chan, readChan, writeChan)
 import Control.Monad (forM_)
 import Control.Monad.Except (liftIO)
+import qualified Data.Graph as Graph
 import qualified Data.Map as Map
 import System.FilePath ((</>))
 
@@ -55,8 +57,8 @@ empty =
 -- CRAWL PROJECT
 
 
-crawlProject :: FilePath -> Project -> Stuff.DepsInfo -> Task.Task Graph
-crawlProject root project depsInfo =
+crawl :: FilePath -> Project -> Stuff.DepsInfo -> Task.Task Graph
+crawl root project depsInfo =
   let
     environment =
       Env
@@ -64,9 +66,14 @@ crawlProject root project depsInfo =
         , _project = project
         , _depModules = Stuff.getDepModules project depsInfo
         }
-  in
-    dfs environment $
+
+    unvisited =
       map (Unvisited Nothing) (Project.getRoots project)
+  in
+    do  graph <- dfs environment unvisited
+        checkForCycles graph
+        return graph
+
 
 
 data Env =
@@ -232,3 +239,29 @@ checkTag project path tag =
 
       else
         Task.throw (E.EffectsUnexpected path)
+
+
+
+-- DETECT CYCLES
+
+
+checkForCycles :: Graph -> Task.Task ()
+checkForCycles (Graph locals _ _ _) =
+  let
+    toNode (name, info) =
+      (name, name, _deps info)
+
+    components =
+      Graph.stronglyConnComp (map toNode (Map.toList locals))
+  in
+    mapM_ checkComponent components
+
+
+checkComponent :: Graph.SCC Module.Raw -> Task.Task ()
+checkComponent scc =
+  case scc of
+    Graph.AcyclicSCC _ ->
+      return ()
+
+    Graph.CyclicSCC names ->
+      Task.throw (Error.Cycle names)

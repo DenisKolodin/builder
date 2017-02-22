@@ -37,6 +37,7 @@ import Reporting.Error.Help (reflow, stack)
 data Error
   = Assets Asset.Error
   | Crawler (Map.Map Module.Raw Crawler.Error)
+  | Cycle [Module.Raw]
 
   -- verify
   | AppBadElm Version
