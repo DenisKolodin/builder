@@ -11,26 +11,25 @@ import System.FilePath ((</>), (<.>))
 import qualified Elm.Compiler.Module as Module
 import qualified Elm.Package as Pkg
 
-import Reporting.Task (Task_)
-import qualified Reporting.Task as Task
-
 
 
 -- ELMI and ELMO
 
 
-elmi :: Pkg.Name -> Pkg.Version -> Module.Raw -> Task_ e FilePath
-elmi pkg vsn name =
-  toArtifactPath pkg vsn name "elmi"
+elmi :: FilePath -> Pkg.Name -> Pkg.Version -> Module.Raw -> FilePath
+elmi root pkg vsn name =
+  toArtifactPath root pkg vsn name "elmi"
 
 
-elmo :: Pkg.Name -> Pkg.Version -> Module.Raw -> Task_ e FilePath
-elmo pkg vsn name =
-  toArtifactPath pkg vsn name "elmo"
+elmo :: FilePath -> Pkg.Name -> Pkg.Version -> Module.Raw -> FilePath
+elmo root pkg vsn name =
+  toArtifactPath root pkg vsn name "elmo"
 
 
-toArtifactPath :: Pkg.Name -> Pkg.Version -> Module.Raw -> String -> Task_ e FilePath
-toArtifactPath pkg vsn name ext =
-  do  root <- Task.getPackageCacheDirFor pkg vsn
-      let path = Text.unpack (Module.hyphenate name)
-      return (root </> path <.> ext)
+toArtifactPath :: FilePath -> Pkg.Name -> Pkg.Version -> Module.Raw -> String -> FilePath
+toArtifactPath root pkg vsn name ext =
+  root
+  </> Pkg.toFilePath pkg
+  </> Pkg.versionToString vsn
+  </> Text.unpack (Module.hyphenate name)
+  <.> ext

@@ -1,202 +1,213 @@
+{-# OPTIONS_GHC -Wall #-}
 {-# LANGUAGE OverloadedStrings #-}
-module Pipeline.Plan where
+module File.Plan
+  ( plan
+  , Info(..)
+  )
+  where
 
-import Control.Monad (foldM)
-import Control.Monad.Except (liftIO, throwError)
-import qualified Data.Set as Set
-import qualified Data.Text as Text
-import Data.Time.Clock (UTCTime)
-import Data.Map ((!))
+import Control.Concurrent (forkIO)
+import Control.Concurrent.Chan (Chan, newChan, readChan, writeChan)
+import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar, readMVar)
+import Control.Monad (foldM, void, when)
+import Control.Monad.Except (liftIO)
+import qualified Data.Binary as Binary
 import qualified Data.Map as Map
-import qualified Data.Maybe as Maybe
+import System.Directory (doesFileExist, getModificationTime, removeFile)
+
 import qualified Elm.Compiler.Module as Module
-import System.Directory (doesFileExist, getModificationTime)
+import qualified Elm.Package as Pkg
 
-import qualified BuildManager as BM
-import qualified Path
-import qualified Utils.File as File
-import TheMasterPlan
-    ( CanonicalModule(CanonicalModule), Location(..)
-    , ProjectGraph(ProjectGraph), ProjectData(..)
-    , BuildGraph(..), BuildData(..)
-    )
+import qualified Deps.Paths
+import qualified File.Crawler as Crawl
+import qualified Reporting.Task as Task
+import qualified Stuff.Paths
 
 
 
-planBuild :: BM.Config -> Set.Set CanonicalModule -> ProjectGraph Location -> BM.Task BuildGraph
-planBuild config modulesToDocument (ProjectGraph projectData _projectNatives) =
-  do  enhancedData <- Map.traverseWithKey (enhanceData (BM._artifactDirectory config)) projectData
-      filteredData <- loadCachedInterfaces modulesToDocument enhancedData
-      return (toBuildGraph filteredData)
+-- PLAN
 
 
-type EnhancedGraph =
-  Map.Map CanonicalModule (ProjectData (Location, Maybe (FilePath, UTCTime)))
+plan :: Crawl.Graph -> Task.Task (Dict Info, Dict Module.Interface)
+plan graph =
+  do  pkgDir <- Task.getPackageCacheDir
+      liftIO $ planHelp pkgDir graph
 
 
-type InterfacedGraph =
-  Map.Map CanonicalModule (ProjectData (Either Location Module.Interface))
+type Dict value = Map.Map Module.Raw value
 
 
+planHelp :: FilePath -> Crawl.Graph -> IO (Dict Info, Dict Module.Interface)
+planHelp pkgDir (Crawl.Graph locals _ foreigns _) =
+  do  queue <- newChan
 
---- LOAD INTERFACES -- what has already been compiled?
+      mvar <- newEmptyMVar
+      statusMVars <- Map.traverseWithKey (getStatus mvar queue foreigns) locals
+      putMVar mvar statusMVars
 
+      void $ forkIO $
+        do  graph <- Map.traverseMaybeWithKey (\_ -> readMVar) statusMVars
+            writeChan queue (EndLoop graph)
 
--- TODO: if two modules in the same package have the same name, their interface
--- files will be indistinguishable right now. The most common case of this is
--- modules named Main. As a stopgap, we never load in the interface file for
--- Main. The real fix may be to add a hash of the source code to the interface
--- files.
-enhanceData
-    :: FilePath
-    -> CanonicalModule
-    -> ProjectData Location
-    -> BM.Task (ProjectData (Location, Maybe (FilePath, UTCTime)))
-enhanceData artifactRoot moduleID (ProjectData location deps) =
-  if isMain moduleID then
-    return $ ProjectData (location, Nothing) deps
-
-  else
-    do  let interfacePath = Path.toInterface artifactRoot moduleID
-        let sourcePath = Path.toSource location
-        interfaceInfo <- liftIO $ getFreshInterfaceInfo sourcePath interfacePath
-        return $ ProjectData (location, interfaceInfo) deps
-
-
-getFreshInterfaceInfo :: FilePath -> FilePath -> IO (Maybe (FilePath, UTCTime))
-getFreshInterfaceInfo sourcePath interfacePath =
-  do  exists <- doesFileExist interfacePath
-      case exists of
-        False ->
-          return Nothing
-
-        True ->
-          do  sourceTime <- getModificationTime sourcePath
-              interfaceTime <- getModificationTime interfacePath
-              return $
-                if sourceTime <= interfaceTime then
-                  Just (interfacePath, interfaceTime)
-                else
-                  Nothing
-
-
-isMain :: CanonicalModule -> Bool
-isMain (CanonicalModule _ names) =
-  names == "Main"
+      ifaceLoader pkgDir queue Map.empty
 
 
 
--- FILTER STALE INTERFACES -- have files become stale due to other changes?
+-- STATUS
 
 
-loadCachedInterfaces :: Set.Set CanonicalModule -> EnhancedGraph -> BM.Task InterfacedGraph
-loadCachedInterfaces modulesToDocument summary =
-  do  sortedNames <- topologicalSort (Map.map projectDependencies summary)
-      foldM (updateFromCache summary modulesToDocument) Map.empty sortedNames
+type Status = Maybe Info
+  -- Nothing == clean
+  -- Just info == dirty
 
 
-updateFromCache
-    :: EnhancedGraph
-    -> Set.Set CanonicalModule
-    -> InterfacedGraph
-    -> CanonicalModule
-    -> BM.Task InterfacedGraph
-updateFromCache enhancedGraph modulesToDocument interfacedGraph moduleName =
-  do  trueLocation <- getTrueLocation
-      return $ Map.insert moduleName (ProjectData trueLocation deps) interfacedGraph
-  where
-    (ProjectData (location, maybeInterfaceInfo) deps) =
-      enhancedGraph ! moduleName
-
-    getTrueLocation =
-      case maybeInterfaceInfo of
-        Nothing ->
-          return $ Left location
-
-        Just (interfacePath, time) ->
-          let
-            depsAreCached = all (isCacheValid time enhancedGraph interfacedGraph) deps
-            needsDocs = Set.member moduleName modulesToDocument
-          in
-            if depsAreCached && not needsDocs then
-              Right <$> File.readBinary interfacePath
-            else
-              return $ Left location
-
-
-isCacheValid :: UTCTime -> EnhancedGraph -> InterfacedGraph -> CanonicalModule -> Bool
-isCacheValid time enhancedGraph interfacedGraph possiblyNativeName =
-  case filterNativeDeps possiblyNativeName of
-    Nothing ->
-      True
-
-    Just name ->
-      let
-        getLoc (ProjectData loc _) =
-          loc
-      in
-        case ( getLoc (interfacedGraph ! name), getLoc (enhancedGraph ! name) ) of
-          ( Right _, (_, Just (_, depTime)) ) ->
-            depTime <= time
-
-          _ ->
-            False
-
-
-
--- FILTER DEPENDENCIES -- which modules actually need to be compiled?
-
-
-toBuildGraph
-    :: InterfacedGraph
-    -> BuildGraph
-toBuildGraph summary =
-  BuildGraph
-    { blockedModules = Map.map (toBuildData interfaces) locations
-    , completedInterfaces = interfaces
+data Info =
+  Info
+    { _path :: FilePath
+    , _clean :: [Module.Raw]
+    , _dirty :: [Module.Raw]
+    , _foreign :: [(Module.Raw, Pkg.Name, Pkg.Version)]
     }
-  where
-    (locations, interfaces) =
-        Map.mapEither divide summary
-
-    divide (ProjectData either deps) =
-        case either of
-          Left location ->
-              Left (ProjectData location deps)
-
-          Right interface ->
-              Right interface
-
-toBuildData
-    :: Map.Map CanonicalModule Module.Interface
-    -> ProjectData Location
-    -> BuildData
-toBuildData interfaces (ProjectData location dependencies) =
-    BuildData blocking location
-  where
-    blocking =
-        Maybe.mapMaybe filterDeps dependencies
-
-    filterDeps :: CanonicalModule -> Maybe CanonicalModule
-    filterDeps deps =
-        filterCachedDeps interfaces =<< filterNativeDeps deps
 
 
-filterCachedDeps
-    :: Map.Map CanonicalModule Module.Interface
-    -> CanonicalModule
-    -> Maybe CanonicalModule
-filterCachedDeps interfaces name =
-    case Map.lookup name interfaces of
-      Just _interface -> Nothing
-      Nothing -> Just name
+
+-- GET STATUS
 
 
-filterNativeDeps :: CanonicalModule -> Maybe CanonicalModule
-filterNativeDeps moduleName@(CanonicalModule _ name) =
-    if Text.isPrefixOf "Native." name then
-      Nothing
+getStatus
+  :: MVar (Dict (MVar Status))
+  -> Chan Msg
+  -> Dict (Pkg.Name, Pkg.Version)
+  -> Module.Raw
+  -> Crawl.Info
+  -> IO (MVar Status)
+getStatus statusMVars queue foreigns name (Crawl.Info path deps) =
+  do  mvar <- newEmptyMVar
 
-    else
-      Just moduleName
+      void $ forkIO $
+        do  statuses <- readMVar statusMVars
+            info <- foldM (addDep statuses foreigns) (Info path [] [] []) deps
 
+            case _dirty info of
+              _ : _ ->
+                do  getInterfaces queue name info
+                    putMVar mvar (Just info)
+
+              [] ->
+                do  fresh <- isFresh name path
+                    if fresh
+                      then putMVar mvar Nothing
+                      else getInterfaces queue name info
+
+      return mvar
+
+
+addDep :: Dict (MVar Status) -> Dict (Pkg.Name, Pkg.Version) -> Info -> Module.Raw -> IO Info
+addDep locals foreigns info name =
+  case Map.lookup name locals of
+    Just mvar ->
+      do  status <- readMVar mvar
+          case status of
+            Nothing ->
+              return $ info { _clean = name : _clean info }
+
+            Just _ ->
+              return $ info { _dirty = name : _dirty info }
+
+    Nothing ->
+      case Map.lookup name foreigns of
+        Just (pkg, vsn) ->
+          return $ info { _foreign = (name, pkg, vsn) : _foreign info }
+
+        Nothing ->
+          return info -- must be native
+
+
+
+-- IS FRESH
+
+
+isFresh :: Module.Raw -> FilePath -> IO Bool
+isFresh name path =
+  do  let elmi = Stuff.Paths.elmi name
+      andM
+        [ doesFileExist elmi
+        , do  cacheTime <- getModificationTime elmi
+              srcTime <- getModificationTime path
+              return (cacheTime >= srcTime)
+        ]
+
+
+andM :: [IO Bool] -> IO Bool
+andM checks =
+  case checks of
+    [] ->
+      return True
+
+    check : otherChecks ->
+      do  bool <- check
+          if bool then andM otherChecks else return False
+
+
+
+-- INTERFACES
+
+
+getInterfaces :: Chan Msg -> Module.Raw -> Info -> IO ()
+getInterfaces queue name info =
+  do  -- load available interfaces
+      mapM_ (writeChan queue . GetLocal) (_clean info)
+      mapM_ (writeChan queue . GetForeign) (_foreign info)
+
+      -- remove existing interface if exists
+      let elmi = Stuff.Paths.elmi name
+      exists <- doesFileExist elmi
+      when exists (removeFile elmi)
+
+
+
+-- INTERFACE LOADER
+
+
+data Msg
+  = EndLoop (Dict Info)
+  | GetLocal Module.Raw
+  | GetForeign (Module.Raw, Pkg.Name, Pkg.Version)
+
+
+ifaceLoader
+  :: FilePath
+  -> Chan Msg
+  -> Dict (MVar Module.Interface)
+  -> IO (Dict Info, Dict Module.Interface)
+ifaceLoader pkgDir queue ifaces =
+  do  msg <- readChan queue
+      case msg of
+        EndLoop dirty ->
+          (,) dirty <$> traverse readMVar ifaces
+
+        GetLocal name ->
+          do  let path = Stuff.Paths.elmi name
+              newIfaces <- load name path ifaces
+              ifaceLoader pkgDir queue newIfaces
+
+        GetForeign (name, pkg, vsn) ->
+          do  let path = Deps.Paths.elmi pkgDir pkg vsn name
+              newIfaces <- load name path ifaces
+              ifaceLoader pkgDir queue newIfaces
+
+
+load
+  :: Module.Raw
+  -> FilePath
+  -> Dict (MVar Module.Interface)
+  -> IO (Dict (MVar Module.Interface))
+load name path ifaces =
+  case Map.lookup name ifaces of
+    Just _ ->
+      return ifaces
+
+    Nothing ->
+      do  mvar <- newEmptyMVar
+          void $ forkIO $ putMVar mvar =<< Binary.decodeFile path
+          return $ Map.insert name mvar ifaces

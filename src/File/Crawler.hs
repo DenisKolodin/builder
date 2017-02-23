@@ -2,7 +2,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 module File.Crawler
   ( Graph(..)
-  , Node(..)
+  , Info(..)
   , crawl
   )
   where
@@ -34,15 +34,15 @@ import qualified Stuff.Info as Stuff
 
 data Graph =
   Graph
-    { _locals :: Map.Map Module.Raw Node
+    { _locals :: Map.Map Module.Raw Info
     , _natives :: Map.Map Module.Raw FilePath
     , _foreigns :: Map.Map Module.Raw (Pkg.Name, Pkg.Version)
     , _problems :: Map.Map Module.Raw E.Error
     }
 
 
-data Node =
-  Node
+data Info =
+  Info
     { _path :: FilePath
     , _deps :: [Module.Raw]
     }
@@ -164,7 +164,7 @@ data Unvisited =
 
 
 data Asset
-  = Local Module.Raw Node
+  = Local Module.Raw Info
   | Native Module.Raw FilePath
   | Foreign Module.Raw Pkg.Name Pkg.Version
 
@@ -207,7 +207,7 @@ readValidHeader env expectedName path =
       checkName path expectedName name
       checkTag (_project env) path tag
 
-      return (Local name (Node path deps))
+      return (Local name (Info path deps))
 
 
 checkName :: FilePath -> Module.Raw -> Module.Raw -> HReader ()
