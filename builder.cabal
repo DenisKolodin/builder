@@ -46,14 +46,15 @@ Library
         Elm.Project,
         Elm.Project.Constraint,
         Elm.Project.Licenses,
+        File.Compile,
         File.Crawler,
         File.IO,
+        File.Plan,
         Reporting.Error,
         Reporting.Progress,
         Reporting.Progress.Terminal,
         Reporting.Task,
-        Stuff.Info,
-        Stuff.Interfaces
+        Stuff.Info
 
     other-modules:
         Deps.Explorer,
@@ -87,7 +88,6 @@ Library
         logict,
         mtl >= 2.2.1 && < 3,
         network >= 2.4 && < 2.7,
-        parallel-io,
         scientific,
         text,
         time,
