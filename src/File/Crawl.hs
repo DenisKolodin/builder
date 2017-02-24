@@ -193,11 +193,12 @@ type HReader a = Task.Task_ E.Error a
 
 readValidHeader :: Env -> Module.Raw -> FilePath -> HReader Asset
 readValidHeader env expectedName path =
-  do  source <- liftIO (IO.readUtf8 path)
+  do  let pkg = Project.getName (_project env)
+      source <- liftIO (IO.readUtf8 path)
 
       (tag, name, deps) <-
         -- TODO get regions on data extracted here
-        case Compiler.parseDependencies (error "TODO") source of
+        case Compiler.parseDependencies pkg source of
           Right result ->
             return result
 
