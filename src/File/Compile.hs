@@ -22,6 +22,7 @@ import qualified File.Plan as Plan
 import qualified File.IO as IO
 import qualified Reporting.Error.Compile as E
 import qualified Reporting.Error as Error
+import qualified Reporting.Progress as Progress
 import qualified Reporting.Task as Task
 
 
@@ -35,21 +36,24 @@ compileAll
   -> Dict Plan.Info
   -> Task.Task (Dict Compiler.Result)
 compileAll project ifaces modules =
-  do  answers <- liftIO $ compileAllHelp project ifaces modules
+  do  Task.report (Progress.CompileStart (Map.size modules))
+
+      reporter <- Task.getReporter
+
+      answers <- liftIO $
+        do  mvar <- newEmptyMVar
+            answerMVars <- Map.traverseWithKey (compile reporter project mvar ifaces) modules
+            putMVar mvar answerMVars
+            traverse readMVar answerMVars
+
+      Task.report Progress.CompileEnd
+
       case sortAnswers answers of
         Left errors ->
           Task.throw (Error.Compile errors)
 
         Right results ->
           return results
-
-
-compileAllHelp :: Project -> Dict (MVar Module.Interface) -> Dict Plan.Info -> IO (Dict Answer)
-compileAllHelp project ifaces modules =
-  do  mvar <- newEmptyMVar
-      answerMVars <- Map.traverseWithKey (compile project mvar ifaces) modules
-      putMVar mvar answerMVars
-      traverse readMVar answerMVars
 
 
 
@@ -102,13 +106,14 @@ sortAnswersHelp acc name answer =
 
 
 compile
-  :: Project
+  :: Progress.Reporter
+  -> Project
   -> MVar (Dict (MVar Answer))
   -> Dict (MVar Module.Interface)
   -> Module.Raw
   -> Plan.Info
   -> IO (MVar Answer)
-compile project answersMVar cachedIfaces name info =
+compile reporter project answersMVar cachedIfaces name info =
   do  mvar <- newEmptyMVar
 
       void $ forkIO $
@@ -120,17 +125,20 @@ compile project answersMVar cachedIfaces name info =
                 putMVar mvar Blocked
 
               Just ifaces ->
-                do  let path = Plan._path info
+                do  reporter (Progress.CompileFileStart name)
+                    let path = Plan._path info
                     let isExposed = elem name (Project.getRoots project)
                     let imports = makeImports info
                     let context = Compiler.Context pkg isExposed imports ifaces
                     source <- IO.readUtf8 path -- TODO store in Plan.Info instead?
                     case Compiler.compile context source of
                       (localizer, warnings, Left errors) ->
-                        putMVar mvar (Bad path errors)
+                        do  reporter (Progress.CompileFileEnd name Progress.Bad)
+                            putMVar mvar (Bad path errors)
 
                       (localizer, warnings, Right result) ->
-                        putMVar mvar (Good result)
+                        do  reporter (Progress.CompileFileEnd name Progress.Good)
+                            putMVar mvar (Good result)
 
       return mvar
 

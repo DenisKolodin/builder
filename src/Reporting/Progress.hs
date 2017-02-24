@@ -30,7 +30,7 @@ data Progress
   | DownloadEnd Outcome
 
   -- compile files
-  | CompileStart [Module.Raw]
+  | CompileStart Int
   | CompileFileStart Module.Raw
   | CompileFileEnd Module.Raw Outcome
   | CompileEnd

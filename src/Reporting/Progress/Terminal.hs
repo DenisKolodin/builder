@@ -87,8 +87,8 @@ step progress state@(State total good bad) =
 
     -- COMPILE
 
-    CompileStart names ->
-      return $ State (length names) 0 0
+    CompileStart size ->
+      return $ State size 0 0
 
     CompileFileStart _ ->
       return state

@@ -6,6 +6,7 @@ module Reporting.Task
   , getPackageCacheDir
   , getPackageCacheDirFor
   , report
+  , getReporter
   , pool
   , fetch, makeUrl
   )
@@ -101,6 +102,11 @@ report :: Progress.Progress -> Task_ e ()
 report progress =
   do  reporter <- asks _reporter
       liftIO (reporter progress)
+
+
+getReporter :: Task Progress.Reporter
+getReporter =
+  asks _reporter
 
 
 
