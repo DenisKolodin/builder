@@ -96,19 +96,6 @@ instance Json.FromJSON AllPkgs where
 -- HELPERS
 
 
-fetchBinary :: (Binary.Binary a) => String -> Task.Task a
-fetchBinary path =
-  Task.fetch path [] $ \request manager ->
-    do  response <- Client.httpLbs request manager
-        let bits = Client.responseBody response
-        case Binary.decodeOrFail bits of
-          Right (_, _, value) ->
-            return (Right value)
-
-          Left (_, _, msg) ->
-            return (Left ("I received corrupt binary data from server.\n" ++ msg))
-
-
 fetchByteString :: String -> Task.Task BS.ByteString
 fetchByteString path =
   Task.fetch path [] $ \request manager ->
