@@ -77,8 +77,8 @@ compile project answersMVar cachedIfaces name info =
 
               Just ifaces ->
                 do  let isExposed = elem name (Project.getRoots project)
-                    let canonicals = error "TODO"
-                    let context = Compiler.Context pkg isExposed canonicals ifaces
+                    let imports = makeImports info
+                    let context = Compiler.Context pkg isExposed imports ifaces
                     source <- IO.readUtf8 (Plan._path info) -- TODO store in Plan.Info instead?
                     case Compiler.compile context source of
                       (localizer, warnings, Left errors) ->
@@ -88,6 +88,25 @@ compile project answersMVar cachedIfaces name info =
                         putMVar mvar (Good result)
 
       return mvar
+
+
+
+-- IMPORTS
+
+
+makeImports :: Plan.Info -> Dict Module.Canonical
+makeImports (Plan.Info _ clean dirty foreign) =
+  let
+    mkLocal name =
+      ( name, Module.Canonical Pkg.dummyName name )
+
+    mkForeign (name, pkg, _vsn) =
+      ( name, Module.Canonical pkg name )
+  in
+    Map.fromList $
+      map mkLocal clean
+      ++ map mkLocal dirty
+      ++ map mkForeign foreign
 
 
 
