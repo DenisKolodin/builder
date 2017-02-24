@@ -14,7 +14,7 @@ module Reporting.Task
 import qualified Control.Exception as E
 import Control.Concurrent (forkIO)
 import Control.Concurrent.Chan (Chan, newChan, readChan, writeChan)
-import Control.Monad (replicateM_)
+import Control.Monad (forever, replicateM_)
 import Control.Monad.Except (ExceptT, runExceptT, throwError, withExceptT)
 import Control.Monad.Reader (ReaderT, runReaderT, ask, asks)
 import Control.Monad.Trans (liftIO)
@@ -113,7 +113,7 @@ pool callback =
       incoming <- liftIO newChan
       outgoing <- liftIO newChan
 
-      liftIO $ replicateM_ (_maxThreads env) $ forkIO $
+      liftIO $ replicateM_ (_maxThreads env) $ forkIO $ forever $
         do  a <- readChan incoming
             b <- runReaderT (runExceptT (callback a)) env
             writeChan outgoing b
