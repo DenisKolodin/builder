@@ -1,5 +1,5 @@
 {-# OPTIONS_GHC -Wall #-}
-module Reporting.Error.Crawler
+module Reporting.Error.Crawl
   ( Error(..)
   )
   where

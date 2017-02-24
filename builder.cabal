@@ -47,7 +47,7 @@ Library
         Elm.Project.Constraint,
         Elm.Project.Licenses,
         File.Compile,
-        File.Crawler,
+        File.Crawl,
         File.IO,
         File.Plan,
         Reporting.Error,

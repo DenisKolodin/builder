@@ -26,7 +26,7 @@ import Elm.Project.Constraint (Constraint)
 import qualified Elm.Project.Constraint as C
 import qualified Reporting.Error.Assets as Asset
 import qualified Reporting.Error.Compile as Compile
-import qualified Reporting.Error.Crawler as Crawler
+import qualified Reporting.Error.Crawl as Crawl
 import qualified Reporting.Error.Help as Help
 import Reporting.Error.Help (reflow, stack)
 
@@ -37,7 +37,7 @@ import Reporting.Error.Help (reflow, stack)
 
 data Error
   = Assets Asset.Error
-  | Crawler (Map.Map Module.Raw Crawler.Error)
+  | Crawl (Map.Map Module.Raw Crawl.Error)
   | Cycle [Module.Raw] -- TODO write docs to help with this scenario
   | Compile (Map.Map Module.Raw Compile.Error) -- TODO sort compile errors by edit time
 
@@ -104,7 +104,7 @@ toDoc err =
     Assets assetError ->
       Asset.toDoc assetError
 
-    Crawler crawlerError ->
+    Crawl crawlerError ->
       error "TODO crawlerError"
 
     Cycle names ->

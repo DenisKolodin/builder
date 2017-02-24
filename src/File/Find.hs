@@ -18,7 +18,7 @@ import qualified Elm.Package as Pkg
 
 import Elm.Project (Project)
 import qualified Elm.Project as Project
-import qualified Reporting.Error.Crawler as E
+import qualified Reporting.Error.Crawl as E
 import qualified Reporting.Task as Task
 import qualified Stuff.Info as Info
 

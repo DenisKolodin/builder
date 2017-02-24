@@ -19,7 +19,7 @@ import qualified Elm.Compiler.Module as Module
 import qualified Elm.Package as Pkg
 
 import qualified Deps.Paths
-import qualified File.Crawler as Crawl
+import qualified File.Crawl as Crawl
 import qualified Reporting.Task as Task
 import qualified Stuff.Paths
 

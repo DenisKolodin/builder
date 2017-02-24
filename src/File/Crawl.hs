@@ -1,6 +1,6 @@
 {-# OPTIONS_GHC -Wall #-}
 {-# LANGUAGE OverloadedStrings #-}
-module File.Crawler
+module File.Crawl
   ( Graph(..)
   , Info(..)
   , crawl
@@ -23,7 +23,7 @@ import qualified Elm.Project as Project
 import qualified File.Find as Find
 import qualified File.IO as IO
 import qualified Reporting.Error as Error
-import qualified Reporting.Error.Crawler as E
+import qualified Reporting.Error.Crawl as E
 import qualified Reporting.Task as Task
 import qualified Stuff.Info as Stuff
 
@@ -99,7 +99,7 @@ dfs env unvisited =
 
       if Map.null (_problems graph)
         then return graph
-        else Task.throw (Error.Crawler (_problems graph))
+        else Task.throw (Error.Crawl (_problems graph))
 
 
 dfsHelp
