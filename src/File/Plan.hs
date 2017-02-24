@@ -28,7 +28,7 @@ import qualified Stuff.Paths
 -- PLAN
 
 
-plan :: Crawl.Graph -> Task.Task (Dict Info, Dict Module.Interface)
+plan :: Crawl.Graph -> Task.Task (Dict Info, Dict (MVar Module.Interface))
 plan graph =
   do  pkgDir <- Task.getPackageCacheDir
       liftIO $ planHelp pkgDir graph
@@ -37,7 +37,7 @@ plan graph =
 type Dict value = Map.Map Module.Raw value
 
 
-planHelp :: FilePath -> Crawl.Graph -> IO (Dict Info, Dict Module.Interface)
+planHelp :: FilePath -> Crawl.Graph -> IO (Dict Info, Dict (MVar Module.Interface))
 planHelp pkgDir (Crawl.Graph locals _ foreigns _) =
   do  queue <- newChan
 
@@ -179,12 +179,12 @@ ifaceLoader
   :: FilePath
   -> Chan Msg
   -> Dict (MVar Module.Interface)
-  -> IO (Dict Info, Dict Module.Interface)
+  -> IO (Dict Info, Dict (MVar Module.Interface))
 ifaceLoader pkgDir queue ifaces =
   do  msg <- readChan queue
       case msg of
         EndLoop dirty ->
-          (,) dirty <$> traverse readMVar ifaces
+          return ( dirty, ifaces )
 
         GetLocal name ->
           do  let path = Stuff.Paths.elmi name

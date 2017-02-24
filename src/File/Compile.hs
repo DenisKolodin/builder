@@ -1,277 +1,137 @@
-module Pipeline.Compile where
+module File.Compile (compileAll) where
 
 import Control.Concurrent (forkIO)
-import qualified Control.Concurrent.Chan as Chan
+import Control.Concurrent.Chan (Chan, newChan, readChan, writeChan)
+import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar, readMVar)
+import Control.Monad (foldM, void, when)
+import Control.Monad.Except (liftIO)
 import qualified Data.List as List
 import qualified Data.Map as Map
 import qualified Data.Maybe as Maybe
 import qualified Data.Set as Set
 import qualified Data.Text as Text
-import qualified Data.Text.IO as Text
-import qualified Data.Text.Lazy.IO as LazyTextIO
+
 import qualified Elm.Compiler as Compiler
 import qualified Elm.Compiler.Module as Module
 import qualified Elm.Docs as Docs
+import qualified Elm.Package as Pkg
 
-import qualified BuildManager as BM
-import qualified Path
-import qualified Report
-import qualified Utils.File as File
-import qualified TheMasterPlan as TMP
-import TheMasterPlan
-    ( CanonicalModule(..), Location, Package
-    , BuildGraph(BuildGraph), BuildData(..)
-    )
+import Elm.Project (Project)
+import qualified Elm.Project as Project
+import qualified File.Plan as Plan
+import qualified File.IO as IO
+import qualified Reporting.Task as Task
 
 
 
--- ENVIRONMENT and STATE
+-- COMPILE ALL
 
 
-data Env =
-  Env
-    { numTasks :: Int
-    , resultChan :: Chan.Chan Result
-    , reportChan :: Chan.Chan Report.Message
-    , doneChan :: Chan.Chan (Interfaces, [Docs.Documentation])
-    , dependencies :: Map.Map CanonicalModule [CanonicalModule]
-    , reverseDependencies :: Map.Map CanonicalModule [CanonicalModule]
-    , cachePath :: FilePath
-    , exposedModules :: Set.Set CanonicalModule
-    , modulesForGeneration :: Set.Set CanonicalModule
-    }
+compileAll
+  :: Project
+  -> Dict (MVar Module.Interface)
+  -> Dict Plan.Info
+  -> Task.Task ()
+compileAll project ifaces modules =
+  do  answers <- liftIO $ compileAllHelp project ifaces modules
+      error "TODO"
 
 
-data State =
-  State
-    { numActiveThreads :: Int
-    , blockedModules :: Map.Map CanonicalModule BuildData
-    , completedInterfaces :: Interfaces
-    , documentation :: [Docs.Documentation]
-    }
+type Dict a = Map.Map Module.Raw a
+
+data Answer
+  = Blocked
+  | Bad [Compiler.Error]
+  | Good Compiler.Result
 
 
-type Interfaces =
-  Map.Map CanonicalModule Module.Interface
-
-
-
--- HELPERS for ENV and STATE
-
-
-initEnv
-    :: FilePath
-    -> Set.Set CanonicalModule
-    -> [CanonicalModule]
-    -> Map.Map CanonicalModule [CanonicalModule]
-    -> BuildGraph
-    -> IO Env
-initEnv cachePath exposedModules modulesForGeneration dependencies (BuildGraph blocked _completed) =
-  do  resultChan <- Chan.newChan
-      reportChan <- Chan.newChan
-      doneChan <- Chan.newChan
-      return $ Env
-        { numTasks = Map.size blocked
-        , resultChan = resultChan
-        , reportChan = reportChan
-        , doneChan = doneChan
-        , dependencies = dependencies
-        , reverseDependencies = reverseGraph dependencies
-        , cachePath = cachePath
-        , exposedModules = exposedModules
-        , modulesForGeneration = Set.fromList modulesForGeneration
-        }
-
-
--- reverse dependencies, "who depends on me?"
-reverseGraph :: (Ord a) => Map.Map a [a] -> Map.Map a [a]
-reverseGraph graph =
-    Map.foldrWithKey flipEdges Map.empty graph
-  where
-    flipEdges name dependencies reversedGraph =
-        foldr (insertDependency name) reversedGraph dependencies
-
-    insertDependency name dep reversedGraph =
-        Map.insertWith (++) dep [name] reversedGraph
-
-
-initState :: Env -> BuildGraph -> IO State
-initState env (BuildGraph blocked completed) =
-  let
-    categorize name buildData@(BuildData blocking location) =
-      case blocking of
-        [] ->
-          Left (name, location)
-
-        _  ->
-          Right buildData
-
-    (readyModules, blockedModules) =
-      Map.mapEitherWithKey categorize blocked
-
-    readyList =
-      Map.elems readyModules
-  in
-    do  mapM (forkIO . buildModule env completed) readyList
-        return $
-          State
-            { numActiveThreads = length readyList
-            , blockedModules = blockedModules
-            , completedInterfaces = completed
-            , documentation = []
-            }
+compileAllHelp :: Project -> Dict (MVar Module.Interface) -> Dict Plan.Info -> IO (Dict Answer)
+compileAllHelp project ifaces modules =
+  do  mvar <- newEmptyMVar
+      answerMVars <- Map.traverseWithKey (compile project mvar ifaces) modules
+      putMVar mvar answerMVars
+      traverse readMVar answerMVars
 
 
 
--- PARALLEL BUILDS!!!
+-- COMPILE
 
 
-build
-    :: BM.Config
-    -> Package
-    -> Set.Set CanonicalModule
-    -> [CanonicalModule]
-    -> Map.Map CanonicalModule [CanonicalModule]
-    -> BuildGraph
-    -> IO (Interfaces, [Docs.Documentation])
-build config rootPkg exposedModules modulesForGeneration dependencies summary =
-  do  env <- initEnv (BM._artifactDirectory config) exposedModules modulesForGeneration dependencies summary
-      forkIO (buildManager env =<< initState env summary)
-      Report.thread (BM._reportType config) (BM._warn config) (reportChan env) rootPkg (numTasks env)
-      Chan.readChan (doneChan env)
+compile
+  :: Project
+  -> MVar (Dict (MVar Answer))
+  -> Dict (MVar Module.Interface)
+  -> Module.Raw
+  -> Plan.Info
+  -> IO (MVar Answer)
+compile project answersMVar cachedIfaces name info =
+  do  mvar <- newEmptyMVar
 
+      void $ forkIO $
+        do  let pkg = Project.getName project
+            answers <- readMVar answersMVar
+            maybeIfaces <- getIfaces pkg answers cachedIfaces info
+            case maybeIfaces of
+              Nothing ->
+                putMVar mvar Blocked
 
-buildManager :: Env -> State -> IO ()
-buildManager env state =
-  if numActiveThreads state == 0 then
+              Just ifaces ->
+                do  let isExposed = elem name (Project.getRoots project)
+                    let canonicals = error "TODO"
+                    let context = Compiler.Context pkg isExposed canonicals ifaces
+                    source <- IO.readUtf8 (Plan._path info) -- TODO store in Plan.Info instead?
+                    case Compiler.compile context source of
+                      (localizer, warnings, Left errors) ->
+                        putMVar mvar (Bad errors)
 
-    do  Chan.writeChan (reportChan env) Report.Close
-        Chan.writeChan (doneChan env) (completedInterfaces state, documentation state)
+                      (localizer, warnings, Right result) ->
+                        putMVar mvar (Good result)
 
-  else
-
-    do  (Result source path modul localizer warnings result) <-
-          Chan.readChan (resultChan env)
-
-        case result of
-          Right (Compiler.Result maybeDocs interface js) ->
-            do  -- Write build artifacts to disk
-                let cache = cachePath env
-                File.writeBinary (Path.toInterface cache modul) interface
-                LazyTextIO.writeFile (Path.toObjectFile cache modul) js
-
-                -- Report results to user
-                Chan.writeChan (reportChan env) (Report.Complete modul localizer path source warnings)
-
-                -- Loop
-                newState <- registerSuccess env state modul interface maybeDocs
-                buildManager env newState
-
-          Left errors ->
-            do  -- Report results to user
-                Chan.writeChan (reportChan env) (Report.Error modul localizer path source warnings errors)
-
-                -- Loop
-                buildManager env (state { numActiveThreads = numActiveThreads state - 1 })
+      return mvar
 
 
 
--- WAIT - REGISTER RESULTS
+-- INTERFACES
 
 
-registerSuccess
-    :: Env
-    -> State
-    -> CanonicalModule
-    -> Module.Interface
-    -> Maybe Docs.Documentation
-    -> IO State
-registerSuccess env state name interface maybeDocs =
-  let
-    (updatedBlockedModules, readyModules) =
-      List.mapAccumR
-        (updateBlockedModules name)
-        (blockedModules state)
-        (Maybe.fromMaybe [] (Map.lookup name (reverseDependencies env)))
+getIfaces
+  :: Pkg.Name
+  -> Dict (MVar Answer)
+  -> Dict (MVar Module.Interface)
+  -> Plan.Info
+  -> IO (Maybe Module.Interfaces)
+getIfaces pkg answers ifaces (Plan.Info path clean dirty foreign) =
+  do  let label name = (name, pkg, ())
 
-    readyList =
-      Maybe.catMaybes readyModules
+      i1 <- traverse (access ifaces) (map label clean)
+      i2 <- traverse (access ifaces) foreign
+      let cached = Map.fromList (i1 ++ i2)
 
-    newCompletedInterfaces =
-      Map.insert name interface (completedInterfaces state)
-  in
-    do  mapM (forkIO . buildModule env newCompletedInterfaces) readyList
-
-        return $
-          state
-            { numActiveThreads = numActiveThreads state - 1 + length readyList
-            , blockedModules = updatedBlockedModules
-            , completedInterfaces = newCompletedInterfaces
-            , documentation = maybe id (:) maybeDocs (documentation state)
-            }
+      i3 <- traverse (access answers) (map label dirty)
+      return $ addAnswers cached i3
 
 
-updateBlockedModules
-    :: CanonicalModule
-    -> Map.Map CanonicalModule BuildData
-    -> CanonicalModule
-    -> (Map.Map CanonicalModule BuildData, Maybe (CanonicalModule, Location))
-updateBlockedModules modul blockedModules potentiallyFreedModule =
-  case Map.lookup potentiallyFreedModule blockedModules of
+access :: Dict (MVar a) -> (Module.Raw, Pkg.Name, vsn) -> IO (Module.Canonical, a)
+access ifaces (name, pkg, _vsn) =
+  case Map.lookup name ifaces of
     Nothing ->
-        (blockedModules, Nothing)
+      error "bug in File.Complie.access, please report at <TODO>!"
 
-    Just (BuildData blocking location) ->
-        case filter (/= modul) blocking of
-          [] ->
-              ( Map.delete potentiallyFreedModule blockedModules
-              , Just (potentiallyFreedModule, location)
-              )
-
-          newBlocking ->
-              ( Map.insert
-                  potentiallyFreedModule
-                  (BuildData newBlocking location)
-                  blockedModules
-              , Nothing
-              )
+    Just mvar ->
+      (,) (Module.Canonical pkg name) <$> readMVar mvar
 
 
+addAnswers :: Module.Interfaces -> [(Module.Canonical, Answer)] -> Maybe Module.Interfaces
+addAnswers ifaces answers =
+  case answers of
+    [] ->
+      Just ifaces
 
--- UPDATE - BUILD SOME MODULES
+    (_, Blocked) : _ ->
+      Nothing
 
+    (_, Bad _) : _ ->
+      Nothing
 
-buildModule :: Env -> Interfaces -> (CanonicalModule, Location) -> IO ()
-buildModule env interfaces (modul, location) =
-  let
-    packageName = fst (TMP.package modul)
-    path = Path.toSource location
-    ifaces = Map.mapKeys TMP.simplifyModuleName interfaces
-    isExposed = Set.member modul (exposedModules env)
-
-    deps =
-        map TMP.simplifyModuleName ((Map.!) (dependencies env) modul)
-
-    context =
-        Compiler.Context packageName isExposed deps
-  in
-  do  source <- Text.readFile path
-
-      let (localizer, warnings, rawResult) =
-            Compiler.compile context source ifaces
-
-      let result =
-            Result source path modul localizer warnings rawResult
-
-      Chan.writeChan (resultChan env) result
-
-
-data Result =
-  Result
-    { _source :: Text.Text
-    , _path :: FilePath
-    , _moduleID :: CanonicalModule
-    , _localizer :: Compiler.Localizer
-    , _warnings :: [Compiler.Warning]
-    , _result :: Either [Compiler.Error] Compiler.Result
-    }
+    (name, Good (Compiler.Result _ iface _)) : otherAnswers ->
+      addAnswers (Map.insert name iface ifaces) otherAnswers

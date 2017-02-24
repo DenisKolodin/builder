@@ -28,7 +28,7 @@ import qualified Stuff.Info as Info
 
 
 data Asset
-  = Local FilePath
+  = Local FilePath  -- TODO carry source code to avoid 2nd read?
   | Native FilePath
   | Foreign Pkg.Name Pkg.Version
 
