@@ -1,5 +1,0 @@
-dist
-log
-*~
-.cabal-sandbox/
-cabal.sandbox.config
