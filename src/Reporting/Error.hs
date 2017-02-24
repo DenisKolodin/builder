@@ -25,6 +25,7 @@ import Elm.Package (Name, Version)
 import Elm.Project.Constraint (Constraint)
 import qualified Elm.Project.Constraint as C
 import qualified Reporting.Error.Assets as Asset
+import qualified Reporting.Error.Compile as Compile
 import qualified Reporting.Error.Crawler as Crawler
 import qualified Reporting.Error.Help as Help
 import Reporting.Error.Help (reflow, stack)
@@ -37,7 +38,8 @@ import Reporting.Error.Help (reflow, stack)
 data Error
   = Assets Asset.Error
   | Crawler (Map.Map Module.Raw Crawler.Error)
-  | Cycle [Module.Raw]
+  | Cycle [Module.Raw] -- TODO write docs to help with this scenario
+  | Compile (Map.Map Module.Raw Compile.Error) -- TODO sort compile errors by edit time
 
   -- verify
   | AppBadElm Version
@@ -63,9 +65,6 @@ data Error
   | Unbumpable Version [Version]
   | InvalidBump Version Version
   | BadBump Version Version Magnitude Version Magnitude
-
-  -- compilation
-  | BadCompile FilePath Text [Compiler.Error]
 
 
 data Magnitude
@@ -108,6 +107,12 @@ toDoc err =
     Crawler crawlerError ->
       error "TODO crawlerError"
 
+    Cycle names ->
+      error "TODO cycle" names
+
+    Compile errors ->
+      error "TODO Compile" errors
+
     AppBadElm version ->
       error ("TODO AppBadElm - " ++ Pkg.versionToString version)
 
@@ -119,9 +124,6 @@ toDoc err =
 
     PkgBadDeps ->
       error "TODO PkgBadDeps"
-
-    BadCompile file source errors ->
-      Help.makeErrorDoc "Bad compile" [text file, text "TODO"]
 
     HttpRequestFailed url message ->
       Help.makeErrorDoc

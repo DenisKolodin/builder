@@ -20,6 +20,8 @@ import Elm.Project (Project)
 import qualified Elm.Project as Project
 import qualified File.Plan as Plan
 import qualified File.IO as IO
+import qualified Reporting.Error.Compile as E
+import qualified Reporting.Error as Error
 import qualified Reporting.Task as Task
 
 
@@ -31,18 +33,15 @@ compileAll
   :: Project
   -> Dict (MVar Module.Interface)
   -> Dict Plan.Info
-  -> Task.Task ()
+  -> Task.Task (Dict Compiler.Result)
 compileAll project ifaces modules =
   do  answers <- liftIO $ compileAllHelp project ifaces modules
-      error "TODO"
+      case sortAnswers answers of
+        Left errors ->
+          Task.throw (Error.Compile errors)
 
-
-type Dict a = Map.Map Module.Raw a
-
-data Answer
-  = Blocked
-  | Bad [Compiler.Error]
-  | Good Compiler.Result
+        Right results ->
+          return results
 
 
 compileAllHelp :: Project -> Dict (MVar Module.Interface) -> Dict Plan.Info -> IO (Dict Answer)
@@ -51,6 +50,51 @@ compileAllHelp project ifaces modules =
       answerMVars <- Map.traverseWithKey (compile project mvar ifaces) modules
       putMVar mvar answerMVars
       traverse readMVar answerMVars
+
+
+
+-- ANSWERS
+
+
+data Answer
+  = Blocked
+  | Bad FilePath [Compiler.Error]
+  | Good Compiler.Result
+
+
+type Dict a = Map.Map Module.Raw a
+
+
+sortAnswers :: Dict Answer -> Either (Dict E.Error) (Dict Compiler.Result)
+sortAnswers answers =
+  Map.foldlWithKey sortAnswersHelp (Right Map.empty) answers
+
+
+sortAnswersHelp
+  :: Either (Dict E.Error) (Dict Compiler.Result)
+  -> Module.Raw
+  -> Answer
+  -> Either (Dict E.Error) (Dict Compiler.Result)
+sortAnswersHelp acc name answer =
+  case answer of
+    Blocked ->
+      acc
+
+    Bad path errors ->
+      case acc of
+        Left dict ->
+          Left (Map.insert name (E.Error path errors) dict)
+
+        Right _ ->
+          Left (Map.singleton name (E.Error path errors))
+
+    Good result ->
+      case acc of
+        Left _ ->
+          acc
+
+        Right results ->
+          Right (Map.insert name result results)
 
 
 
@@ -76,13 +120,14 @@ compile project answersMVar cachedIfaces name info =
                 putMVar mvar Blocked
 
               Just ifaces ->
-                do  let isExposed = elem name (Project.getRoots project)
+                do  let path = Plan._path info
+                    let isExposed = elem name (Project.getRoots project)
                     let imports = makeImports info
                     let context = Compiler.Context pkg isExposed imports ifaces
-                    source <- IO.readUtf8 (Plan._path info) -- TODO store in Plan.Info instead?
+                    source <- IO.readUtf8 path -- TODO store in Plan.Info instead?
                     case Compiler.compile context source of
                       (localizer, warnings, Left errors) ->
-                        putMVar mvar (Bad errors)
+                        putMVar mvar (Bad path errors)
 
                       (localizer, warnings, Right result) ->
                         putMVar mvar (Good result)
@@ -149,7 +194,7 @@ addAnswers ifaces answers =
     (_, Blocked) : _ ->
       Nothing
 
-    (_, Bad _) : _ ->
+    (_, Bad _ _) : _ ->
       Nothing
 
     (name, Good (Compiler.Result _ iface _)) : otherAnswers ->
