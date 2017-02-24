@@ -84,20 +84,20 @@ getStatus
 getStatus statusMVars queue foreigns name (Crawl.Info path deps) =
   do  mvar <- newEmptyMVar
 
-      void $ forkIO $
+      void $ forkIO $ putMVar mvar =<<
         do  statuses <- readMVar statusMVars
             info <- foldM (addDep statuses foreigns) (Info path [] [] []) deps
 
             case _dirty info of
               _ : _ ->
                 do  getInterfaces queue name info
-                    putMVar mvar (Just info)
+                    return (Just info)
 
               [] ->
                 do  fresh <- isFresh name path
-                    if fresh
-                      then putMVar mvar Nothing
-                      else getInterfaces queue name info
+                    if fresh then return Nothing else
+                      do  getInterfaces queue name info
+                          return (Just info)
 
       return mvar
 
