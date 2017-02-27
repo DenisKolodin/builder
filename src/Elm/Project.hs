@@ -8,6 +8,7 @@ module Elm.Project
   , toSolution
   , isSameSolution
 
+  , get
   , getName
   , getSourceDir
   , getNative
@@ -85,7 +86,7 @@ checkOverlap deps tests =
 
 getTransDeps :: Project -> TransitiveDeps
 getTransDeps project =
-  destruct _app_deps _pkg_transitive_deps project
+  get _app_deps _pkg_transitive_deps project
 
 
 toSolution :: TransitiveDeps -> Map Name Version
@@ -104,30 +105,15 @@ isSameSolution solution (TransitiveDeps a b c d) =
 
 getName :: Project -> Name
 getName project =
-  destruct (\_ -> Pkg.dummyName) _pkg_name project
+  get (\_ -> Pkg.dummyName) _pkg_name project
 
 
 
 -- EXTRACT INFORMARION
 
 
-getSourceDir :: Project -> FilePath
-getSourceDir project =
-  destruct _app_source_dir (const "src") project
-
-
-getNative :: Project -> Bool
-getNative project =
-  destruct (const False) _pkg_natives project
-
-
-getEffect :: Project -> Bool
-getEffect project =
-  destruct (const False) _pkg_effects project
-
-
-destruct :: (AppInfo -> a) -> (PkgInfo -> a) -> Project -> a
-destruct appFunc pkgFunc project =
+get :: (AppInfo -> a) -> (PkgInfo -> a) -> Project -> a
+get appFunc pkgFunc project =
   case project of
     App info ->
       appFunc info
@@ -136,7 +122,22 @@ destruct appFunc pkgFunc project =
       pkgFunc info
 
 
+getSourceDir :: Project -> FilePath
+getSourceDir project =
+  get _app_source_dir (const "src") project
+
+
+getNative :: Project -> Bool
+getNative project =
+  get (const False) _pkg_natives project
+
+
+getEffect :: Project -> Bool
+getEffect project =
+  get (const False) _pkg_effects project
+
+
 getRoots :: Project -> [Module.Raw]
 getRoots project =
-  destruct _app_pages _pkg_exposed project
+  get _app_pages _pkg_exposed project
 
