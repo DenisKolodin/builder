@@ -4,11 +4,11 @@ module Deps.Website
   ( getElmJson
   , getNewPackages
   , getAllPackages
+  , download
   )
   where
 
 import qualified Data.Aeson as Json
-import qualified Data.Binary as Binary
 import qualified Data.ByteString.Lazy as BS
 import qualified Data.HashMap.Lazy as HashMap
 import qualified Data.Map as Map
@@ -19,6 +19,7 @@ import qualified Network.HTTP.Client.MultipartFormData as Multi
 import Elm.Package (Name, Version)
 import qualified Elm.Package as Pkg
 
+import qualified Reporting.Progress as Progress
 import qualified Reporting.Task as Task
 
 
@@ -114,6 +115,17 @@ fetchJson path =
 
           Left msg ->
             return (Left ("I received corrupt JSON from server.\n" ++ msg))
+
+
+
+-- DOWNLOAD
+
+
+download :: Name -> Version -> Task.Task ()
+download name version =
+  do  Task.report (Progress.DownloadPkgStart name version)
+
+      Task.report (Progress.DownloadPkgEnd name version Progress.Good)
 
 
 
