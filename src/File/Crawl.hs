@@ -7,7 +7,7 @@ module File.Crawl
   )
   where
 
-import Control.Concurrent.Chan (Chan, readChan, writeChan)
+import Control.Concurrent.Chan (Chan, newChan, readChan)
 import Control.Monad (forM_)
 import Control.Monad.Except (liftIO)
 import qualified Data.Graph as Graph
@@ -90,58 +90,55 @@ data Env =
 
 dfs :: Env -> [Unvisited] -> Task.Task Graph
 dfs env unvisited =
-  do  (input, output) <- Task.pool (worker env)
+  do  chan <- liftIO $ newChan
 
       graph <-
-        liftIO $
-          do  mapM_ (writeChan input) unvisited
-              dfsHelp env input output (length unvisited) empty
+        do  mapM_ (Task.workerChan chan . crawlFile env) unvisited
+            dfsHelp env chan (length unvisited) empty
 
       if Map.null (_problems graph)
         then return graph
         else Task.throw (Error.Crawl (_problems graph))
 
 
-dfsHelp
-  :: Env
-  -> Chan Unvisited
-  -> Chan (Either (Module.Raw, E.Error) Asset)
-  -> Int
-  -> Graph
-  -> IO Graph
-dfsHelp env input output pendingWork graph =
+type FileResult = Either (Module.Raw, E.Error) Asset
+
+
+dfsHelp :: Env -> Chan FileResult -> Int -> Graph -> Task.Task Graph
+dfsHelp env chan pendingWork graph =
   if pendingWork == 0 then
     return graph
 
   else
-    do  asset <- readChan output
+    do  asset <- liftIO $ readChan chan
         case asset of
           Right (Local name node) ->
             do  let locals = Map.insert name node (_locals graph)
                 let newGraph = graph { _locals = locals }
                 let deps = filter (isNew newGraph) (_deps node)
                 forM_ deps $ \dep ->
-                  writeChan input (Unvisited (Just name) dep)
+                  Task.workerChan chan $
+                    crawlFile env (Unvisited (Just name) dep)
                 let newPending = pendingWork - 1 + length deps
-                dfsHelp env input output newPending newGraph
+                dfsHelp env chan newPending newGraph
 
           Right (Native name path) ->
             do  let natives = Map.insert name path (_natives graph)
                 let newGraph = graph { _natives = natives }
                 let newPending = pendingWork - 1
-                dfsHelp env input output newPending newGraph
+                dfsHelp env chan newPending newGraph
 
           Right (Foreign name pkg vsn) ->
             do  let foreigns = Map.insert name (pkg, vsn) (_foreigns graph)
                 let newGraph = graph { _foreigns = foreigns }
                 let newPending = pendingWork - 1
-                dfsHelp env input output newPending newGraph
+                dfsHelp env chan newPending newGraph
 
           Left (name, err) ->
             do  let problems = Map.insert name err (_problems graph)
                 let newGraph = graph { _problems = problems }
                 let newPending = pendingWork - 1
-                dfsHelp env input output newPending newGraph
+                dfsHelp env chan newPending newGraph
 
 
 isNew :: Graph -> Module.Raw -> Bool
@@ -169,8 +166,8 @@ data Asset
   | Foreign Module.Raw Pkg.Name Pkg.Version
 
 
-worker :: Env -> Unvisited -> Task.Task_ (Module.Raw, E.Error) Asset
-worker env (Unvisited maybeParent name) =
+crawlFile :: Env -> Unvisited -> Task.Task_ (Module.Raw, E.Error) Asset
+crawlFile env (Unvisited maybeParent name) =
   Task.mapError ((,) name) $
     do  asset <- Find.find "." (_project env) (_depModules env) name
         case asset of

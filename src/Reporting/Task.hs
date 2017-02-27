@@ -7,7 +7,8 @@ module Reporting.Task
   , getPackageCacheDirFor
   , report
   , getReporter
-  , pool
+  , workerMVar
+  , workerChan
   , fetch, makeUrl
   )
   where
@@ -15,7 +16,8 @@ module Reporting.Task
 import qualified Control.Exception as E
 import Control.Concurrent (forkIO)
 import Control.Concurrent.Chan (Chan, newChan, readChan, writeChan)
-import Control.Monad (forever, replicateM_)
+import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar)
+import Control.Monad (forever, join, replicateM_)
 import Control.Monad.Except (ExceptT, runExceptT, throwError, withExceptT)
 import Control.Monad.Reader (ReaderT, runReaderT, ask, asks)
 import Control.Monad.Trans (liftIO)
@@ -51,8 +53,8 @@ type Task_ e =
 
 data Env =
   Env
-    { _maxThreads :: Int
-    , _cacheDir :: FilePath
+    { _cacheDir :: FilePath
+    , _worker :: IO () -> IO ()
     , _httpManager :: Http.Manager
     , _reporter :: Progress.Reporter
     }
@@ -62,8 +64,9 @@ run :: Progress.Reporter -> Task a -> IO (Either Error.Error a)
 run reporter task =
   Network.withSocketsDo $
     do  root <- Assets.getPackageRoot
+        pool <- initPool 4
         httpManager <- Http.newManager Http.tlsManagerSettings
-        let env = Env 4 root httpManager reporter
+        let env = Env root pool httpManager reporter
         runReaderT (runExceptT task) env
 
 
@@ -113,18 +116,35 @@ getReporter =
 -- THREAD POOL
 
 
-pool :: (a -> Task_ x b) -> Task_ e (Chan a, Chan (Either x b))
-pool callback =
+workerMVar :: Task_ e a -> Task_ x (MVar (Either e a))
+workerMVar task =
   do  env <- ask
-      incoming <- liftIO newChan
-      outgoing <- liftIO newChan
+      mvar <- liftIO newEmptyMVar
 
-      liftIO $ replicateM_ (_maxThreads env) $ forkIO $ forever $
-        do  a <- readChan incoming
-            b <- runReaderT (runExceptT (callback a)) env
-            writeChan outgoing b
+      liftIO $ _worker env $
+        do  result <- runReaderT (runExceptT task) env
+            putMVar mvar result
 
-      return (incoming, outgoing)
+      return mvar
+
+
+workerChan :: Chan (Either e a) -> Task_ e a -> Task_ x ()
+workerChan chan task =
+  do  env <- ask
+
+      liftIO $ _worker env $
+        do  result <- runReaderT (runExceptT task) env
+            writeChan chan result
+
+
+initPool :: Int -> IO (IO () -> IO ())
+initPool size =
+  do  chan <- newChan
+
+      replicateM_ size $ forkIO $ forever $
+        join (readChan chan)
+
+      return $ writeChan chan
 
 
 
