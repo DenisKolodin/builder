@@ -9,7 +9,7 @@ module Reporting.Task
   , getReporter
   , workerMVar
   , workerChan
-  , fetch, makeUrl
+  , fetch, fetchFromInternet, makeUrl
   )
   where
 
@@ -179,34 +179,29 @@ versionParam =
 -- HTTP
 
 
-fetch
-  :: String
-  -> [(String, String)]
-  -> (Http.Request -> Http.Manager -> IO (Either String a))
-  -> Task a
+type Handler a = Http.Request -> Http.Manager -> IO (Either String a)
+
+
+fetch :: String -> [(String, String)] -> Handler a -> Task a
 fetch path params handler =
-  do  let url = makeUrl path params
-      manager <- asks _httpManager
+  fetchFromInternet (makeUrl path params) handler
+
+
+fetchFromInternet :: String -> Handler a -> Task a
+fetchFromInternet url handler =
+  do  manager <- asks _httpManager
       result <- liftIO (fetchSafe url manager handler)
       either throwError return result
 
 
-fetchSafe
-  :: String
-  -> Http.Manager
-  -> (Http.Request -> Http.Manager -> IO (Either String a))
-  -> IO (Either Error.Error a)
+fetchSafe :: String -> Http.Manager -> Handler a -> IO (Either Error.Error a)
 fetchSafe url manager handler =
   fetchUnsafe url manager handler
     `E.catch` handleHttpError url
     `E.catch` \e -> handleAnyError url (e :: E.SomeException)
 
 
-fetchUnsafe
-  :: String
-  -> Http.Manager
-  -> (Http.Request -> Http.Manager -> IO (Either String a))
-  -> IO (Either Error.Error a)
+fetchUnsafe :: String -> Http.Manager -> Handler a -> IO (Either Error.Error a)
 fetchUnsafe url manager handler =
   do  request <- Http.parseUrlThrow url
       result <- handler request manager
@@ -218,7 +213,7 @@ fetchUnsafe url manager handler =
           return (Left (Error.HttpRequestFailed url msg))
 
 
-handleHttpError :: String -> Http.HttpException -> IO (Either Error.Error b)
+handleHttpError :: String -> Http.HttpException -> IO (Either Error.Error a)
 handleHttpError url exception =
   case exception of
     Http.StatusCodeException (Http.Status _code err) headers _ ->
@@ -234,7 +229,7 @@ handleHttpError url exception =
       handleAnyError url exception
 
 
-handleAnyError :: (E.Exception e) => String -> e -> IO (Either Error.Error b)
+handleAnyError :: (E.Exception e) => String -> e -> IO (Either Error.Error a)
 handleAnyError url exception =
   return $ Left $ Error.HttpRequestFailed url (show exception)
 
