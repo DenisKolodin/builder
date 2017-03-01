@@ -1,19 +1,13 @@
 module File.Compile (compileAll) where
 
 import Control.Concurrent (forkIO)
-import Control.Concurrent.Chan (Chan, newChan, readChan, writeChan)
 import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar, readMVar)
-import Control.Monad (foldM, void, when)
+import Control.Monad (void)
 import Control.Monad.Except (liftIO)
-import qualified Data.List as List
 import qualified Data.Map as Map
-import qualified Data.Maybe as Maybe
-import qualified Data.Set as Set
-import qualified Data.Text as Text
 
 import qualified Elm.Compiler as Compiler
 import qualified Elm.Compiler.Module as Module
-import qualified Elm.Docs as Docs
 import qualified Elm.Package as Pkg
 
 import Elm.Project (Project)
