@@ -12,8 +12,6 @@ import Deps.Explorer (Explorer)
 import qualified Deps.Explorer as Explorer
 import Elm.Project.Constraint (Constraint)
 import qualified Elm.Project.Constraint as Con
-import qualified Reporting.Error as Error
-import qualified Reporting.Task as Task
 
 
 
