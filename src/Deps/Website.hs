@@ -20,7 +20,7 @@ import qualified Data.Map as Map
 import qualified Data.Text as Text
 import qualified Network.HTTP.Client as Client
 import qualified Network.HTTP.Client.MultipartFormData as Multi
-import System.FilePath ((</>), joinPath, splitPath)
+import System.FilePath ((</>))
 
 import Elm.Package (Name, Version)
 import qualified Elm.Package as Pkg
