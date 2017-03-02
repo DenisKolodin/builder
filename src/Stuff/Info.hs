@@ -139,10 +139,7 @@ rebuildCache project =
   do  IO.remove Path.pkgInfo
       IO.remove Path.deps
 
-      Verify.verify project
-
-      let solution = Project.toSolution (Project.getTransDeps project)
-      depsInfo <- Map.elems <$> Map.traverseWithKey Get.info solution
+      depsInfo <- Map.elems <$> Verify.verify project
 
       IO.writeBinary Path.pkgInfo project
       IO.writeBinary Path.deps depsInfo

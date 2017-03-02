@@ -1,8 +1,9 @@
 module Deps.Verify (verify) where
 
 
-import Control.Concurrent.MVar (readMVar)
-import Control.Monad (filterM, forM)
+import Control.Concurrent (forkIO)
+import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar, readMVar)
+import Control.Monad (filterM, forM, void)
 import Control.Monad.Trans (liftIO)
 import Data.Map (Map)
 import qualified Data.Map as Map
@@ -28,7 +29,7 @@ import qualified Reporting.Task as Task
 -- VERIFY
 
 
-verify :: Project -> Task.Task ()
+verify :: Project -> Task.Task (Map Name PkgInfo)
 verify project =
   do  solution <- Project.get verifyApp verifyPkg project
       verifySolution solution
@@ -93,18 +94,10 @@ verifyPkgHelp solution name constraint =
 -- VERIFY SOLUTION
 
 
-verifySolution :: Map Name Version -> Task.Task ()
+verifySolution :: Map Name Version -> Task.Task (Map Name PkgInfo)
 verifySolution solution =
-  do  let pkgs = Map.toList solution
-      noSrc <- filterM (no "src") pkgs
-
-      download noSrc
-
-      noStuff <- filterM (no "elm-stuff") pkgs
-
-      -- see if it all builds against itself
-
-      error "TODO"
+  do  download =<< filterM (no "src") (Map.toList solution)
+      verifyBuildArtifacts solution
 
 
 no :: FilePath -> (Name, Version) -> Task.Task Bool
@@ -126,10 +119,33 @@ download packages =
 
           results <- liftIO $ traverse readMVar mvars
 
-          case sequence results of
+          case sequence_ results of
             Left err ->
               do  Task.report (Progress.DownloadEnd Progress.Bad)
                   Task.throw err
 
-            Right abc ->
+            Right _ ->
               Task.report (Progress.DownloadEnd Progress.Good)
+
+
+
+-- VERIFY BUILD ARTIFACTS
+
+
+verifyBuildArtifacts :: Map Name Version -> Task.Task (Map Name PkgInfo)
+verifyBuildArtifacts solution =
+  do  mvar <- liftIO newEmptyMVar
+      pkgInfo <- Map.traverseWithKey (verifyBuild mvar) solution
+      liftIO $ putMVar mvar pkgInfo
+      liftIO $ traverse readMVar pkgInfo
+
+
+verifyBuild :: MVar (Map Name (MVar PkgInfo)) -> Name -> Version -> Task.Task (MVar PkgInfo)
+verifyBuild pkgInfoMVar name version =
+  do  mvar <- liftIO newEmptyMVar
+
+      liftIO $ void $ forkIO $
+        do  readMVar pkgInfoMVar
+            error "TODO actually compile this project"
+
+      return mvar
