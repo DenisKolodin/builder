@@ -25,7 +25,7 @@ import qualified File.IO as IO
 import qualified Reporting.Error as Error
 import qualified Reporting.Error.Crawl as E
 import qualified Reporting.Task as Task
-import qualified Stuff.Info as Stuff
+import qualified Stuff.Deps as Deps
 
 
 
@@ -57,14 +57,14 @@ empty =
 -- CRAWL PROJECT
 
 
-crawl :: FilePath -> Project -> Stuff.DepsInfo -> Task.Task Graph
+crawl :: FilePath -> Project -> Deps.Info -> Task.Task Graph
 crawl root project depsInfo =
   let
     environment =
       Env
-        { _srcDirs = [ root </> Project.getSourceDir project ]
+        { _root = root
         , _project = project
-        , _depModules = Stuff.getDepModules project depsInfo
+        , _depsModules = Deps.getModules project depsInfo
         }
 
     unvisited =
@@ -78,9 +78,9 @@ crawl root project depsInfo =
 
 data Env =
   Env
-    { _srcDirs :: [FilePath]
+    { _root :: FilePath
     , _project :: Project
-    , _depModules :: Stuff.DepModules
+    , _depsModules :: Deps.Modules
     }
 
 
@@ -167,9 +167,9 @@ data Asset
 
 
 crawlFile :: Env -> Unvisited -> Task.Task_ (Module.Raw, E.Error) Asset
-crawlFile env (Unvisited maybeParent name) =
+crawlFile env@(Env root project depsModules) (Unvisited maybeParent name) =
   Task.mapError ((,) name) $
-    do  asset <- Find.find "." (_project env) (_depModules env) name
+    do  asset <- Find.find root project depsModules name
         case asset of
           Find.Local path ->
             readValidHeader env name path
