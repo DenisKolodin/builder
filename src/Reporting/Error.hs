@@ -23,7 +23,7 @@ import qualified Elm.Package as Pkg
 import Elm.Package (Name, Version)
 
 import Elm.Project.Constraint (Constraint)
-import qualified Elm.Project.Constraint as C
+import qualified Elm.Project.Constraint as Con
 import qualified Reporting.Error.Assets as Asset
 import qualified Reporting.Error.Compile as Compile
 import qualified Reporting.Error.Crawl as Crawl
@@ -37,6 +37,7 @@ import Reporting.Error.Help (reflow, stack)
 
 data Error
   = Assets Asset.Error
+  | BadDep Name Version
   | Crawl (Map.Map Module.Raw Crawl.Error)
   | Cycle [Module.Raw] -- TODO write docs to help with this scenario
   | Compile (Map.Map Module.Raw Compile.Error) -- TODO sort compile errors by edit time
@@ -104,14 +105,17 @@ toDoc err =
     Assets assetError ->
       Asset.toDoc assetError
 
-    Crawl crawlerError ->
-      error "TODO crawlerError"
+    BadDep name version ->
+      error ("TODO " ++ Pkg.toString name ++ " " ++ Pkg.versionToString version)
+
+    Crawl errors ->
+      error ("TODO crawl " ++ show (Map.keys errors))
 
     Cycle names ->
-      error "TODO cycle" names
+      error ("TODO cycle " ++ show names)
 
     Compile errors ->
-      error "TODO Compile" errors
+      error ("TODO compile " ++ show (Map.keys errors))
 
     AppBadElm version ->
       error ("TODO AppBadElm - " ++ Pkg.versionToString version)
@@ -119,8 +123,8 @@ toDoc err =
     AppBadDeps ->
       error "TODO AppBadDeps"
 
-    PkgBadElm _constraint ->
-      error "TODO PkgBadElm"
+    PkgBadElm constraint ->
+      error ("TODO PkgBadElm " ++ Con.toString constraint)
 
     PkgBadDeps ->
       error "TODO PkgBadDeps"
@@ -151,8 +155,8 @@ toDoc err =
             ++ Pkg.versionToString version
             ++ " as well. Maybe you want one of the following constraints?"
         , indent 4 $ vcat $ map text $
-            [ C.toString (C.expand constraint version)
-            , C.toString (C.untilNextMajor version)
+            [ Con.toString (Con.expand constraint version)
+            , Con.toString (Con.untilNextMajor version)
             ]
         , reflow $
             "Modify elm.json by hand to be exactly what you want."
@@ -271,7 +275,7 @@ toDoc err =
 
 showDependency :: Name -> Constraint -> String
 showDependency name constraint =
-    show (Pkg.toString name) ++ ": " ++ show (C.toString constraint)
+    show (Pkg.toString name) ++ ": " ++ show (Con.toString constraint)
 
 
 hintToDoc :: Hint -> Doc
