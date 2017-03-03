@@ -20,7 +20,7 @@ import Elm.Project (Project)
 import qualified Elm.Project as Project
 import qualified Reporting.Error.Crawl as E
 import qualified Reporting.Task as Task
-import qualified Stuff.Info as Info
+import qualified Stuff.Deps as Deps
 
 
 
@@ -37,12 +37,12 @@ data Asset
 -- FIND
 
 
-find :: FilePath -> Project -> Info.DepModules -> Module.Raw -> Task.Task_ E.Error Asset
-find root project depModules name =
+find :: FilePath -> Project -> Deps.Modules -> Module.Raw -> Task.Task_ E.Error Asset
+find root project depsModules name =
   do
       codePaths <- liftIO $ getCodePaths root project name
 
-      case (codePaths, Map.lookup name depModules) of
+      case (codePaths, Map.lookup name depsModules) of
         ([Elm path], Nothing) ->
             return (Local path)
 
