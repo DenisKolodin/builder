@@ -5,6 +5,8 @@ module Reporting.Error.Compile
   where
 
 
+import Data.Text (Text)
+
 import qualified Elm.Compiler as Compiler
 
 
@@ -15,5 +17,6 @@ import qualified Elm.Compiler as Compiler
 data Error =
   Error
     { _path :: FilePath
+    , _source :: Text
     , _errors :: [Compiler.Error]
     }
