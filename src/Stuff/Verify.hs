@@ -1,97 +1,29 @@
 {-# OPTIONS_GHC -Wall #-}
 {-# LANGUAGE DeriveGeneric #-}
-module Stuff.Info
-  ( DepsInfo
-  , getPackages
-  , getDepModules, DepModules
-  , verify
+module Stuff.Verify
+  ( verify
   )
   where
 
 
-import Data.Binary (Binary)
-import qualified Data.List as List
 import qualified Data.Map as Map
-import qualified Data.Set as Set
-import GHC.Generics (Generic)
 
 import qualified Elm.Compiler as Compiler
-import qualified Elm.Compiler.Module as Module
-import Elm.Package (Name, Version)
 
-import qualified Deps.Get as Get
 import qualified Deps.Verify as Verify
 import Elm.Project (Project(..), AppInfo(..), PkgInfo(..))
-import qualified Elm.Project as Project
 import qualified Elm.Project.Constraint as Con
 import qualified File.IO as IO
 import qualified Reporting.Task as Task
+import qualified Stuff.Deps as Deps
 import qualified Stuff.Paths as Path
-
-
-
--- DEPS INFO
-
-
-data DepsInfo =
-  DepsInfo
-    { _deps :: [Project.PkgInfo]
-    }
-    deriving (Generic)
-
-
-instance Binary DepsInfo
-
-
-getPackages :: DepsInfo -> [(Name,Version)]
-getPackages (DepsInfo deps) =
-  flip map deps $ \info ->
-    ( _pkg_name info, _pkg_version info )
-
-
-
--- DEPENDENCY MODULES
-
-
-type DepModules =
-  Map.Map Module.Raw [(Name, Version)]
-
-
-getDepModules :: Project -> DepsInfo -> DepModules
-getDepModules project (DepsInfo depsInfo) =
-  let
-    (Project.TransitiveDeps deps _ _ _) =
-      Project.getTransDeps project
-
-    directNames =
-      Map.keysSet deps
-
-    isDirect info =
-      Set.member (_pkg_name info) directNames
-
-    directDeps =
-      filter isDirect depsInfo
-  in
-    List.foldl' insertPkg Map.empty directDeps
-
-
-insertPkg :: DepModules -> Project.PkgInfo -> DepModules
-insertPkg depModules info =
-  let
-    home =
-      ( _pkg_name info, _pkg_version info )
-
-    insertModule dict modul =
-      Map.insertWith (++) modul [home] dict
-  in
-    List.foldl' insertModule depModules (_pkg_exposed info)
 
 
 
 -- VERIFY
 
 
-verify :: Project -> Task.Task DepsInfo
+verify :: Project -> Task.Task Deps.Info
 verify project =
   do  exists1 <- IO.exists Path.pkgInfo
       exists2 <- IO.exists Path.deps
@@ -134,7 +66,7 @@ isValid p1 p2 =
 -- ACTUALLY VALIDATE
 
 
-rebuildCache :: Project -> Task.Task DepsInfo
+rebuildCache :: Project -> Task.Task Deps.Info
 rebuildCache project =
   do  IO.remove Path.pkgInfo
       IO.remove Path.deps
@@ -143,5 +75,5 @@ rebuildCache project =
 
       IO.writeBinary Path.pkgInfo project
       IO.writeBinary Path.deps depsInfo
-      return (DepsInfo depsInfo)
+      return (Deps.Info depsInfo)
 
