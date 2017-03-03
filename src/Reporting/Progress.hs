@@ -29,6 +29,11 @@ data Progress
   | DownloadPkgEnd Name Version Outcome
   | DownloadEnd Outcome
 
+  -- build dependencies
+  | BuildDepsStart Int
+  | BuildDepsProgress
+  | BuildDepsEnd
+
   -- compile files
   | CompileStart Int
   | CompileFileStart Module.Raw

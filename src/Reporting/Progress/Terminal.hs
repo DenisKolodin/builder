@@ -85,6 +85,25 @@ step progress state@(State total good bad) =
           return state
 
 
+    -- BUILD DEPS
+
+    BuildDepsStart size ->
+      do  hPutStr stdout "Verifying dependencies..."
+          hFlush stdout
+          return (State size 0 0)
+
+    BuildDepsProgress ->
+      do  let n = good + 1
+          let msg = "\rBuilding dependencies (" ++ show n ++ "/" ++ show total ++ ")"
+          hPutStr stdout msg
+          hFlush stdout
+          return (State total n 0)
+
+    BuildDepsEnd ->
+      do  putStrLn "\rDependencies ready!                "
+          return (State 0 0 0)
+
+
     -- COMPILE
 
     CompileStart size ->
@@ -94,14 +113,12 @@ step progress state@(State total good bad) =
       return state
 
     CompileFileEnd _ Good ->
-      do  hPutStr stdout $ Bar.clear
-          hPutStr stdout $ Bar.render (good + 1) bad total
+      do  hPutStr stdout $ Bar.render (good + 1) bad total
           hFlush stdout
           return $ State total (good + 1) bad
 
     CompileFileEnd _ Bad ->
-      do  hPutStr stdout $ Bar.clear
-          hPutStr stdout $ Bar.render good (bad + 1) total
+      do  hPutStr stdout $ Bar.render good (bad + 1) total
           hFlush stdout
           return $ State total good (bad + 1)
 
@@ -155,3 +172,4 @@ makeBullet name version outcome =
           red (text "✗")
   in
     text "  " <> bullet <+> nm <+> vsn <> text "\n"
+

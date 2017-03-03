@@ -29,7 +29,7 @@ render successes failures total =
     unitsLeft =
       truncate width - unitsDone
   in
-    "["
+    "\r["
     ++ replicate unitsDone '='
     ++ replicate unitsLeft ' '
     ++ "] - "
