@@ -14,11 +14,13 @@ import Control.Monad.Except (liftIO)
 import qualified Data.Binary as Binary
 import qualified Data.Map as Map
 import System.Directory (doesFileExist, getModificationTime, removeFile)
+import System.FilePath ((</>))
 
 import qualified Elm.Compiler.Module as Module
 import qualified Elm.Package as Pkg
 
-import qualified Deps.Paths
+import Elm.Project (Project)
+import qualified Elm.Project as Project
 import qualified File.Crawl as Crawl
 import qualified Reporting.Task as Task
 import qualified Stuff.Paths
@@ -28,28 +30,33 @@ import qualified Stuff.Paths
 -- PLAN
 
 
-plan :: Crawl.Graph -> Task.Task (Dict Info, Dict (MVar Module.Interface))
-plan graph =
-  do  pkgDir <- Task.getPackageCacheDir
-      liftIO $ planHelp pkgDir graph
-
-
 type Dict value = Map.Map Module.Raw value
 
 
-planHelp :: FilePath -> Crawl.Graph -> IO (Dict Info, Dict (MVar Module.Interface))
-planHelp pkgDir (Crawl.Graph locals _ foreigns _) =
+plan :: FilePath -> Project -> Crawl.Graph -> Task.Task (Dict Info, Module.Interfaces)
+plan root project (Crawl.Graph locals _ foreigns _) =
+  liftIO $
   do  queue <- newChan
+      let env = Env queue root (Project.getName project)
 
       mvar <- newEmptyMVar
-      statusMVars <- Map.traverseWithKey (getStatus mvar queue foreigns) locals
+      statusMVars <- Map.traverseWithKey (getStatus env mvar foreigns) locals
       putMVar mvar statusMVars
 
       void $ forkIO $
         do  graph <- Map.traverseMaybeWithKey (\_ -> readMVar) statusMVars
             writeChan queue (EndLoop graph)
 
-      ifaceLoader pkgDir queue Map.empty
+      -- TODO load all the cached interfaces for deps
+      ifaceLoader queue Map.empty
+
+
+data Env =
+  Env
+    { _queue :: Chan Msg
+    , _root :: FilePath
+    , _pkg :: Pkg.Name
+    }
 
 
 
@@ -66,7 +73,7 @@ data Info =
     { _path :: FilePath
     , _clean :: [Module.Raw]
     , _dirty :: [Module.Raw]
-    , _foreign :: [(Module.Raw, Pkg.Name, Pkg.Version)]
+    , _foreign :: [Module.Canonical]
     }
 
 
@@ -75,29 +82,36 @@ data Info =
 
 
 getStatus
-  :: MVar (Dict (MVar Status))
-  -> Chan Msg
+  :: Env
+  -> MVar (Dict (MVar Status))
   -> Dict (Pkg.Name, Pkg.Version)
   -> Module.Raw
   -> Crawl.Info
   -> IO (MVar Status)
-getStatus statusMVars queue foreigns name (Crawl.Info path deps) =
+getStatus env statusMVars foreigns name (Crawl.Info path deps) =
   do  mvar <- newEmptyMVar
 
       void $ forkIO $ putMVar mvar =<<
         do  statuses <- readMVar statusMVars
             info <- foldM (addDep statuses foreigns) (Info path [] [] []) deps
 
+            let elmi = _root env </> Stuff.Paths.elmi name
+
             case _dirty info of
               _ : _ ->
-                do  getInterfaces queue name info
+                do  remove elmi
                     return (Just info)
 
               [] ->
-                do  fresh <- isFresh name path
-                    if fresh then return Nothing else
-                      do  getInterfaces queue name info
-                          return (Just info)
+                do  fresh <- isFresh path elmi
+                    if fresh
+                      then
+                        do  let canonical = Module.Canonical (_pkg env) name
+                            writeChan (_queue env) (Get canonical elmi)
+                            return Nothing
+                      else
+                        do  remove elmi
+                            return (Just info)
 
       return mvar
 
@@ -116,8 +130,8 @@ addDep locals foreigns info name =
 
     Nothing ->
       case Map.lookup name foreigns of
-        Just (pkg, vsn) ->
-          return $ info { _foreign = (name, pkg, vsn) : _foreign info }
+        Just (pkg, _vsn) ->
+          return $ info { _foreign = Module.Canonical pkg name : _foreign info }
 
         Nothing ->
           return info -- must be native
@@ -127,15 +141,14 @@ addDep locals foreigns info name =
 -- IS FRESH
 
 
-isFresh :: Module.Raw -> FilePath -> IO Bool
-isFresh name path =
-  do  let elmi = Stuff.Paths.elmi name
-      andM
-        [ doesFileExist elmi
-        , do  cacheTime <- getModificationTime elmi
-              srcTime <- getModificationTime path
-              return (cacheTime >= srcTime)
-        ]
+isFresh :: FilePath -> FilePath -> IO Bool
+isFresh path elmi =
+  andM
+    [ doesFileExist elmi
+    , do  elmiTime <- getModificationTime elmi
+          srcTime <- getModificationTime path
+          return (elmiTime >= srcTime)
+    ]
 
 
 andM :: [IO Bool] -> IO Bool
@@ -149,20 +162,10 @@ andM checks =
           if bool then andM otherChecks else return False
 
 
-
--- INTERFACES
-
-
-getInterfaces :: Chan Msg -> Module.Raw -> Info -> IO ()
-getInterfaces queue name info =
-  do  -- load available interfaces
-      mapM_ (writeChan queue . GetLocal) (_clean info)
-      mapM_ (writeChan queue . GetForeign) (_foreign info)
-
-      -- remove existing interface if exists
-      let elmi = Stuff.Paths.elmi name
-      exists <- doesFileExist elmi
-      when exists (removeFile elmi)
+remove :: FilePath -> IO ()
+remove path =
+  do  exists <- doesFileExist path
+      when exists (removeFile path)
 
 
 
@@ -171,43 +174,21 @@ getInterfaces queue name info =
 
 data Msg
   = EndLoop (Dict Info)
-  | GetLocal Module.Raw
-  | GetForeign (Module.Raw, Pkg.Name, Pkg.Version)
+  | Get Module.Canonical FilePath
 
 
-ifaceLoader
-  :: FilePath
-  -> Chan Msg
-  -> Dict (MVar Module.Interface)
-  -> IO (Dict Info, Dict (MVar Module.Interface))
-ifaceLoader pkgDir queue ifaces =
+ifaceLoader :: Chan Msg -> Module.Interfaces -> IO (Dict Info, Module.Interfaces)
+ifaceLoader queue ifaces =
   do  msg <- readChan queue
       case msg of
         EndLoop dirty ->
           return ( dirty, ifaces )
 
-        GetLocal name ->
-          do  let path = Stuff.Paths.elmi name
-              newIfaces <- load name path ifaces
-              ifaceLoader pkgDir queue newIfaces
+        Get canonical elmi ->
+          case Map.lookup canonical ifaces of
+            Just _ ->
+              ifaceLoader queue ifaces
 
-        GetForeign (name, pkg, vsn) ->
-          do  let path = Deps.Paths.elmi pkgDir pkg vsn name
-              newIfaces <- load name path ifaces
-              ifaceLoader pkgDir queue newIfaces
-
-
-load
-  :: Module.Raw
-  -> FilePath
-  -> Dict (MVar Module.Interface)
-  -> IO (Dict (MVar Module.Interface))
-load name path ifaces =
-  case Map.lookup name ifaces of
-    Just _ ->
-      return ifaces
-
-    Nothing ->
-      do  mvar <- newEmptyMVar
-          void $ forkIO $ putMVar mvar =<< Binary.decodeFile path
-          return $ Map.insert name mvar ifaces
+            Nothing ->
+              do  iface <- Binary.decodeFile elmi
+                  ifaceLoader queue $ Map.insert canonical iface ifaces
