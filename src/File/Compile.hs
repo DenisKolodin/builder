@@ -1,10 +1,11 @@
 module File.Compile (compileAll) where
 
 import Control.Concurrent (forkIO)
-import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar, readMVar)
+import Control.Concurrent.MVar (MVar, newEmptyMVar, newMVar, putMVar, readMVar, takeMVar)
 import Control.Monad (void)
 import Control.Monad.Except (liftIO)
 import qualified Data.Map as Map
+import Data.Text (Text)
 
 import qualified Elm.Compiler as Compiler
 import qualified Elm.Compiler.Module as Module
@@ -26,16 +27,17 @@ import qualified Reporting.Task as Task
 
 compileAll
   :: Project
-  -> Dict (MVar Module.Interface)
+  -> Module.Interfaces
   -> Dict Plan.Info
   -> Task.Task (Dict Compiler.Result)
-compileAll project ifaces modules =
+compileAll project cachedIfaces modules =
   do  Task.report (Progress.CompileStart (Map.size modules))
 
       reporter <- Task.getReporter
 
       answers <- liftIO $
         do  mvar <- newEmptyMVar
+            ifaces <- newMVar cachedIfaces
             answerMVars <- Map.traverseWithKey (compile reporter project mvar ifaces) modules
             putMVar mvar answerMVars
             traverse readMVar answerMVars
@@ -56,7 +58,7 @@ compileAll project ifaces modules =
 
 data Answer
   = Blocked
-  | Bad FilePath [Compiler.Error]
+  | Bad FilePath Text [Compiler.Error]
   | Good Compiler.Result
 
 
@@ -78,13 +80,13 @@ sortAnswersHelp acc name answer =
     Blocked ->
       acc
 
-    Bad path errors ->
+    Bad path src errors ->
       case acc of
         Left dict ->
-          Left (Map.insert name (E.Error path errors) dict)
+          Left (Map.insert name (E.Error path src errors) dict)
 
         Right _ ->
-          Left (Map.singleton name (E.Error path errors))
+          Left (Map.singleton name (E.Error path src errors))
 
     Good result ->
       case acc of
@@ -103,35 +105,37 @@ compile
   :: Progress.Reporter
   -> Project
   -> MVar (Dict (MVar Answer))
-  -> Dict (MVar Module.Interface)
+  -> MVar Module.Interfaces
   -> Module.Raw
   -> Plan.Info
   -> IO (MVar Answer)
-compile reporter project answersMVar cachedIfaces name info =
+compile reporter project answersMVar ifacesMVar name info =
   do  mvar <- newEmptyMVar
 
       void $ forkIO $
-        do  let pkg = Project.getName project
-            answers <- readMVar answersMVar
-            maybeIfaces <- getIfaces pkg answers cachedIfaces info
-            case maybeIfaces of
-              Nothing ->
-                putMVar mvar Blocked
-
-              Just ifaces ->
+        do  answers <- readMVar answersMVar
+            blocked <- isBlocked answers info
+            if blocked
+              then putMVar mvar Blocked
+              else
                 do  reporter (Progress.CompileFileStart name)
+                    let pkg = Project.getName project
                     let path = Plan._path info
                     let isExposed = elem name (Project.getRoots project)
-                    let imports = makeImports info
+                    let imports = makeImports project info
+                    ifaces <- readMVar ifacesMVar
                     let context = Compiler.Context pkg isExposed imports ifaces
                     source <- IO.readUtf8 path -- TODO store in Plan.Info instead?
                     case Compiler.compile context source of
                       (localizer, warnings, Left errors) ->
                         do  reporter (Progress.CompileFileEnd name Progress.Bad)
-                            putMVar mvar (Bad path errors)
+                            putMVar mvar (Bad path source errors)
 
-                      (localizer, warnings, Right result) ->
+                      (localizer, warnings, Right result@(Compiler.Result _ iface _)) ->
                         do  reporter (Progress.CompileFileEnd name Progress.Good)
+                            let canonicalName = Module.Canonical pkg name
+                            lock <- takeMVar ifacesMVar
+                            putMVar ifacesMVar (Map.insert canonicalName iface lock)
                             putMVar mvar (Good result)
 
       return mvar
@@ -141,14 +145,17 @@ compile reporter project answersMVar cachedIfaces name info =
 -- IMPORTS
 
 
-makeImports :: Plan.Info -> Dict Module.Canonical
-makeImports (Plan.Info _ clean dirty foreign) =
+makeImports :: Project -> Plan.Info -> Dict Module.Canonical
+makeImports project (Plan.Info _ clean dirty foreign) =
   let
-    mkLocal name =
-      ( name, Module.Canonical Pkg.dummyName name )
+    pkgName =
+      Project.getName project
 
-    mkForeign (name, pkg, _vsn) =
-      ( name, Module.Canonical pkg name )
+    mkLocal name =
+      ( name, Module.Canonical pkgName name )
+
+    mkForeign canonicalName@(Module.Canonical _ name) =
+      ( name, canonicalName )
   in
     Map.fromList $
       map mkLocal clean
@@ -160,44 +167,32 @@ makeImports (Plan.Info _ clean dirty foreign) =
 -- INTERFACES
 
 
-getIfaces
-  :: Pkg.Name
-  -> Dict (MVar Answer)
-  -> Dict (MVar Module.Interface)
-  -> Plan.Info
-  -> IO (Maybe Module.Interfaces)
-getIfaces pkg answers ifaces (Plan.Info path clean dirty foreign) =
-  do  let label name = (name, pkg, ())
-
-      i1 <- traverse (access ifaces) (map label clean)
-      i2 <- traverse (access ifaces) foreign
-      let cached = Map.fromList (i1 ++ i2)
-
-      i3 <- traverse (access answers) (map label dirty)
-      return $ addAnswers cached i3
+isBlocked :: Dict (MVar Answer) -> Plan.Info -> IO Bool
+isBlocked answers info =
+  anyBlock <$> traverse (get answers) (Plan._dirty info)
 
 
-access :: Dict (MVar a) -> (Module.Raw, Pkg.Name, vsn) -> IO (Module.Canonical, a)
-access ifaces (name, pkg, _vsn) =
-  case Map.lookup name ifaces of
+get :: Dict (MVar Answer) -> Module.Raw -> IO Answer
+get names name =
+  case Map.lookup name names of
     Nothing ->
-      error "bug in File.Complie.access, please report at <TODO>!"
+      error "bug manifesting in File.Complie.get, please report at <TODO>!"
 
     Just mvar ->
-      (,) (Module.Canonical pkg name) <$> readMVar mvar
+      readMVar mvar
 
 
-addAnswers :: Module.Interfaces -> [(Module.Canonical, Answer)] -> Maybe Module.Interfaces
-addAnswers ifaces answers =
+anyBlock :: [Answer] -> Bool
+anyBlock answers =
   case answers of
     [] ->
-      Just ifaces
+      False
 
-    (_, Blocked) : _ ->
-      Nothing
+    Blocked : _ ->
+      True
 
-    (_, Bad _ _) : _ ->
-      Nothing
+    Bad _ _ _ : _ ->
+      True
 
-    (name, Good (Compiler.Result _ iface _)) : otherAnswers ->
-      addAnswers (Map.insert name iface ifaces) otherAnswers
+    Good _ : otherAnswers ->
+      anyBlock otherAnswers
