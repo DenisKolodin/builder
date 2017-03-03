@@ -54,7 +54,7 @@ Library
         Reporting.Progress,
         Reporting.Progress.Terminal,
         Reporting.Task,
-        Stuff.Info
+        Stuff.Verify
 
     other-modules:
         Deps.Explorer,
@@ -70,6 +70,7 @@ Library
         Reporting.Error.Crawl,
         Reporting.Error.Help,
         Reporting.Progress.Bar,
+        Stuff.Deps,
         Stuff.Paths,
         Utils.Json
 
