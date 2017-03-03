@@ -89,7 +89,7 @@ getJsonErrorInfo err location =
     Json.Field field subErr ->
       getJsonErrorInfo subErr $
         if Text.isInfixOf "-" field then
-          location ++ "['" ++ Text.unpack field ++ "']"
+          location ++ "[\"" ++ Text.unpack field ++ "\"]"
 
         else
           location ++ "." ++ Text.unpack field

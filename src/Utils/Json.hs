@@ -148,7 +148,7 @@ field name (Decoder run) =
 
           Nothing ->
             Left $ mkError $
-              Failure value ("a `" ++ Text.unpack name ++ "` field")
+              Failure value ("a \"" ++ Text.unpack name ++ "\" field")
 
       _ ->
         Left (mkError (Failure value "an object"))
