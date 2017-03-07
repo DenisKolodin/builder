@@ -5,8 +5,10 @@ import Control.Concurrent (forkIO)
 import Control.Concurrent.MVar (MVar, newMVar, newEmptyMVar, putMVar, readMVar, takeMVar)
 import Control.Monad (filterM, forM, void)
 import Control.Monad.Trans (liftIO)
-import Data.Map (Map)
 import qualified Data.Map as Map
+import qualified Data.Set as Set
+import Data.Map (Map)
+import Data.Set (Set)
 import System.Directory (doesDirectoryExist)
 import System.FilePath ((</>))
 
@@ -18,7 +20,6 @@ import Elm.Project.Constraint (Constraint)
 
 import qualified Deps.Explorer as Explorer
 import qualified Deps.Get as Get
-import qualified Deps.Interface as Interface
 import qualified Deps.Solver.Internal as Solver
 import qualified Deps.Website as Website
 import qualified Elm.Compiler as Compiler
@@ -26,11 +27,13 @@ import qualified Elm.Project as Project
 import qualified Elm.Project.Constraint as Con
 import qualified File.Compile as Compile
 import qualified File.Crawl as Crawl
+import qualified File.IO as IO
 import qualified File.Plan as Plan
 import qualified Reporting.Error as Error
 import qualified Reporting.Progress as Progress
 import qualified Reporting.Task as Task
 import qualified Stuff.Deps as Deps
+import qualified Stuff.Paths as Paths
 
 
 
@@ -163,8 +166,7 @@ verifyBuild pkgInfoMVar ifacesMVar name version =
 
             answer <- ifNotBlocked depAnswers $ \infos ->
               do  ifaces <- readMVar ifacesMVar
-                  let summary = Deps.makeCheapSummary info infos ifaces
-                  either <- runner (build name version info summary)
+                  either <- runner (getIface name version info infos ifaces)
                   case either of
                     Right ifaces ->
                       do  latest <- takeMVar ifacesMVar
@@ -178,17 +180,6 @@ verifyBuild pkgInfoMVar ifacesMVar name version =
             putMVar mvar answer
 
       return mvar
-
-
-build :: Name -> Version -> PkgInfo -> Deps.Summary -> Task.Task Module.Interfaces
-build name version info summary =
-  do  let project = Pkg info
-      root <- Task.getPackageCacheDirFor name version
-      graph <- Crawl.crawl root project summary
-      (dirty, cachedIfaces) <- Plan.plan root project summary graph
-      ifaces <- Compile.compileAll project cachedIfaces dirty
-      Interface.write info ifaces
-      return ifaces
 
 
 
@@ -230,3 +221,105 @@ isOk answer =
     Ok info -> Just info
     Blocked -> Nothing
     Err _ _ -> Nothing
+
+
+
+-- GET INTERFACE
+
+
+getIface
+  :: Name
+  -> Version
+  -> PkgInfo
+  -> Map Name PkgInfo
+  -> Module.Interfaces
+  -> Task.Task Module.Interfaces
+getIface name version info infos depIfaces =
+  do  root <- Task.getPackageCacheDirFor name version
+      let dependencies = Map.map _pkg_version infos
+
+      cached <- isCached root dependencies
+
+      if cached
+        then IO.readBinary (root </> "ifaces.dat")
+        else
+          do  let project = Pkg info
+              let summary = Deps.makeCheapSummary info infos depIfaces
+
+              Paths.removeStuff root
+
+              graph <- Crawl.crawl root project summary
+              (dirty, cachedIfaces) <- Plan.plan root project summary graph
+              results <- Compile.compileAll project cachedIfaces dirty
+
+              Paths.removeStuff root
+
+              let ifaces = crush name info results
+              updateCache root dependencies ifaces
+              return ifaces
+
+
+-- IS CACHED?
+
+
+isCached :: FilePath -> Map Name Version -> Task.Task Bool
+isCached root deps =
+  IO.andM
+    [ IO.exists (root </> "cached.dat")
+    , IO.exists (root </> "ifaces.dat")
+    , isCachedHelp deps <$> IO.readBinary (root </> "cached.dat")
+    ]
+
+
+isCachedHelp :: Map Name Version -> Map Name (Set Version) -> Bool
+isCachedHelp deps cachedDeps =
+  let
+    matches =
+      Map.intersectionWith Set.member deps cachedDeps
+  in
+    Map.size deps == Map.size matches
+    && Map.foldr (&&) True matches
+
+
+
+-- UPDATE CACHE
+
+
+updateCache :: FilePath -> Map Name Version -> Module.Interfaces -> Task.Task ()
+updateCache root dependencies ifaces =
+  do  let path = root </> "cached.dat"
+      let deps = Map.map Set.singleton dependencies
+
+      exists <- IO.exists path
+
+      if exists
+        then
+          do  oldDeps <- IO.readBinary path
+              IO.writeBinary path (Map.unionWith Set.union deps oldDeps)
+        else
+          do  IO.writeBinary (root </> "ifaces.dat") ifaces
+              IO.writeBinary path deps
+
+
+
+-- CRUSH INTERFACES
+
+
+crush :: Name -> PkgInfo -> Map Module.Raw Compiler.Result -> Module.Interfaces
+crush pkg info results =
+  let
+    exposed =
+      Set.fromList (Project._pkg_exposed info)
+  in
+    Map.mapKeys (Module.Canonical pkg) $
+      Map.mapMaybeWithKey (crushHelp exposed) results
+
+
+crushHelp :: Set Module.Raw -> Module.Raw -> Compiler.Result -> Maybe Module.Interface
+crushHelp exposed name (Compiler.Result _ iface _) =
+  if Set.member name exposed then
+    Just iface
+
+  else
+    Module.privatize iface
+

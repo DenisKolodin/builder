@@ -1,27 +1,26 @@
 module Stuff.Paths
   ( solution
   , summary
+  , removeStuff
   , elmi
   , elmo
   )
   where
 
 
+import Control.Monad.Trans (liftIO)
 import qualified Data.Text as Text
+import qualified System.Directory as Dir
 import System.FilePath ((</>), (<.>))
 
 import qualified Elm.Compiler as Compiler
 import qualified Elm.Compiler.Module as Module
 import qualified Elm.Package as Pkg
+import qualified Reporting.Task as Task
 
 
 
 -- PATHS
-
-
-stuff :: FilePath
-stuff =
-  "elm-stuff" </> Pkg.versionToString Compiler.version
 
 
 solution :: FilePath
@@ -32,6 +31,25 @@ solution =
 summary :: FilePath
 summary =
   stuff </> "summary.dat"
+
+
+stuff :: FilePath
+stuff =
+  "elm-stuff" </> Pkg.versionToString Compiler.version
+
+
+
+-- REMOVE STUFF
+
+
+removeStuff :: FilePath -> Task.Task_ e ()
+removeStuff root =
+  liftIO $
+  do  let dir = root </> "elm-stuff"
+      exists <- Dir.doesDirectoryExist dir
+      if exists
+        then Dir.removeDirectoryRecursive dir
+        else return ()
 
 
 

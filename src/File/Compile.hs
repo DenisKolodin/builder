@@ -29,16 +29,16 @@ compileAll
   :: Project
   -> Module.Interfaces
   -> Dict Plan.Info
-  -> Task.Task Module.Interfaces
-compileAll project cachedIfaces modules =
+  -> Task.Task (Dict Compiler.Result)
+compileAll project ifaces modules =
   do  Task.report (Progress.CompileStart (Map.size modules))
 
       reporter <- Task.getReporter
 
-      ifaces <- liftIO $ newMVar cachedIfaces
       answers <- liftIO $
         do  mvar <- newEmptyMVar
-            answerMVars <- Map.traverseWithKey (compile reporter project mvar ifaces) modules
+            iMVar <- newMVar ifaces
+            answerMVars <- Map.traverseWithKey (compile reporter project mvar iMVar) modules
             putMVar mvar answerMVars
             traverse readMVar answerMVars
 
@@ -48,8 +48,8 @@ compileAll project cachedIfaces modules =
         Left errors ->
           Task.throw (Error.Compile errors)
 
-        Right _results ->
-          liftIO $ readMVar ifaces
+        Right results ->
+          return results
 
 
 
