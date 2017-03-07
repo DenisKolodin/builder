@@ -1,6 +1,7 @@
 module Stuff.Paths
-  ( pkgInfo
-  , deps
+  ( solution
+  , exposed
+  , ifaces
   , elmi
   , elmo
   )
@@ -10,7 +11,9 @@ module Stuff.Paths
 import qualified Data.Text as Text
 import System.FilePath ((</>), (<.>))
 
+import qualified Elm.Compiler as Compiler
 import qualified Elm.Compiler.Module as Module
+import qualified Elm.Package as Pkg
 
 
 
@@ -19,17 +22,22 @@ import qualified Elm.Compiler.Module as Module
 
 stuff :: FilePath
 stuff =
-  "elm-stuff"
+  "elm-stuff" </> Pkg.versionToString Compiler.version
 
 
-pkgInfo :: FilePath
-pkgInfo =
-  stuff </> "elm.dat"
+solution :: FilePath
+solution =
+  stuff </> "solution.dat"
 
 
-deps :: FilePath
-deps =
-  stuff </> "deps.dat"
+exposed :: FilePath
+exposed =
+  stuff </> "exposed.dat"
+
+
+ifaces :: FilePath
+ifaces =
+  stuff </> "ifaces.dat"
 
 
 
