@@ -4,9 +4,8 @@ module Elm.Project
   , read
   , write
 
-  , getTransDeps
-  , toSolution
-  , isSameSolution
+  , getDirectDeps
+  , appSolution
 
   , get
   , getName
@@ -21,8 +20,8 @@ import Prelude hiding (read)
 import Control.Monad.Trans (liftIO)
 import qualified Data.ByteString.Lazy as BS
 import qualified Data.Map as Map
-import qualified Data.Set as Set
 import Data.Map (Map)
+import Data.Set (Set)
 
 import qualified Elm.Compiler.Module as Module
 import qualified Elm.Package as Pkg
@@ -68,7 +67,7 @@ projectToString _project =
 -- VALIDATE
 
 
-checkOverlap :: Map Name a -> Map Name a -> Either (Set.Set Name) ()
+checkOverlap :: Map Name a -> Map Name a -> Either (Set Name) ()
 checkOverlap deps tests =
   let
     overlap =
@@ -81,22 +80,21 @@ checkOverlap deps tests =
 
 
 
--- TRANSITIVE DEPS
+-- DEPENDENCIES
 
 
-getTransDeps :: Project -> TransitiveDeps
-getTransDeps project =
-  get _app_deps _pkg_transitive_deps project
+getDirectDeps :: Project -> Set Name
+getDirectDeps project =
+  get (Map.keysSet . _app_deps) (Map.keysSet . _pkg_deps) project
 
 
-toSolution :: TransitiveDeps -> Map Name Version
-toSolution (TransitiveDeps a b c d) =
-  Map.unions [a,b,c,d]
-
-
-isSameSolution :: Map Name Version -> TransitiveDeps -> Bool
-isSameSolution solution (TransitiveDeps a b c d) =
-  solution == Map.unions [ a, b, c, d ]
+appSolution :: AppInfo -> Map Name Version
+appSolution info =
+  Map.unions
+    [ _app_deps info
+    , _app_test_deps info
+    , _app_trans_deps info
+    ]
 
 
 

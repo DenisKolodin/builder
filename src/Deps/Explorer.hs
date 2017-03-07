@@ -91,7 +91,7 @@ getConstraints name version =
           do  pkgInfo <- lift $ Get.info name version
 
               let elm = Project._pkg_elm_version pkgInfo
-              let pkgs = Project._pkg_dependencies pkgInfo
+              let pkgs = Project._pkg_deps pkgInfo
               let info = Info elm pkgs
 
               modify $ \(Metadata vsns infos) ->
