@@ -5,14 +5,18 @@ import Control.Concurrent (forkIO)
 import Control.Concurrent.MVar (MVar, newMVar, newEmptyMVar, putMVar, readMVar, takeMVar)
 import Control.Monad (filterM, forM, void)
 import Control.Monad.Trans (liftIO)
+import qualified Data.ByteString.Lazy as BS
 import qualified Data.Map as Map
+import qualified Data.Maybe as Maybe
 import qualified Data.Set as Set
+import qualified Data.Text.Lazy as Text
 import Data.Map (Map)
 import Data.Set (Set)
 import System.Directory (doesDirectoryExist)
 import System.FilePath ((</>))
 
 import qualified Elm.Compiler.Module as Module
+import qualified Elm.Docs as Docs
 import qualified Elm.Package as Pkg
 import Elm.Package (Name, Version)
 import Elm.Project (Project(..), AppInfo(..), PkgInfo(..))
@@ -236,9 +240,9 @@ getIface
   -> Task.Task Module.Interfaces
 getIface name version info infos depIfaces =
   do  root <- Task.getPackageCacheDirFor name version
-      let dependencies = Map.map _pkg_version infos
+      let solution = Map.map _pkg_version infos
 
-      cached <- isCached root dependencies
+      cached <- isCached root solution
 
       if cached
         then IO.readBinary (root </> "ifaces.dat")
@@ -254,30 +258,31 @@ getIface name version info infos depIfaces =
 
               Paths.removeStuff root
 
-              let ifaces = crush name info results
-              updateCache root dependencies ifaces
-              return ifaces
+              updateCache root name info solution results
+
 
 
 -- IS CACHED?
 
 
 isCached :: FilePath -> Map Name Version -> Task.Task Bool
-isCached root deps =
+isCached root solution =
   IO.andM
     [ IO.exists (root </> "cached.dat")
     , IO.exists (root </> "ifaces.dat")
-    , isCachedHelp deps <$> IO.readBinary (root </> "cached.dat")
+    , IO.exists (root </> "bundle.js")
+    , IO.exists (root </> "documentation.json")
+    , isCachedHelp solution <$> IO.readBinary (root </> "cached.dat")
     ]
 
 
 isCachedHelp :: Map Name Version -> Map Name (Set Version) -> Bool
-isCachedHelp deps cachedDeps =
+isCachedHelp solution cachedDeps =
   let
     matches =
-      Map.intersectionWith Set.member deps cachedDeps
+      Map.intersectionWith Set.member solution cachedDeps
   in
-    Map.size deps == Map.size matches
+    Map.size solution == Map.size matches
     && Map.foldr (&&) True matches
 
 
@@ -285,10 +290,17 @@ isCachedHelp deps cachedDeps =
 -- UPDATE CACHE
 
 
-updateCache :: FilePath -> Map Name Version -> Module.Interfaces -> Task.Task ()
-updateCache root dependencies ifaces =
+updateCache
+  :: FilePath
+  -> Name
+  -> PkgInfo
+  -> Map Name Version
+  -> Map Module.Raw Compiler.Result
+  -> Task.Task Module.Interfaces
+updateCache root name info solution results =
   do  let path = root </> "cached.dat"
-      let deps = Map.map Set.singleton dependencies
+      let deps = Map.map Set.singleton solution
+      let ifaces = crush name info results
 
       exists <- IO.exists path
 
@@ -299,6 +311,14 @@ updateCache root dependencies ifaces =
         else
           do  IO.writeBinary (root </> "ifaces.dat") ifaces
               IO.writeBinary path deps
+              let resultList = Map.elems results
+              let docs = Maybe.mapMaybe Compiler._docs resultList
+              let bundle = Text.concat (map Compiler._js resultList)
+              liftIO $ do
+                IO.writeUtf8 (root </> "bundle.js") (Text.toStrict bundle)
+                BS.writeFile (root </> "documentation.json") (Docs.prettyJson docs)
+
+      return ifaces
 
 
 
