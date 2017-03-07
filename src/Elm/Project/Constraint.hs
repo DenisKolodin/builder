@@ -1,5 +1,4 @@
 {-# OPTIONS_GHC -Wall #-}
-{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE OverloadedStrings #-}
 module Elm.Project.Constraint
   ( Constraint
@@ -19,8 +18,6 @@ module Elm.Project.Constraint
   )
   where
 
-import Data.Binary (Binary)
-import GHC.Generics (Generic)
 import Control.Monad (guard)
 import qualified Data.Aeson as Json
 import qualified Data.Text as Text
@@ -37,17 +34,13 @@ import Elm.Package (Version(..))
 
 data Constraint
     = Range Version Op Op Version
-    deriving (Eq, Generic)
+    deriving (Eq)
 
 
 data Op
   = Less
   | LessOrEqual
-  deriving (Eq, Generic)
-
-
-instance Binary Constraint
-instance Binary Op
+  deriving (Eq)
 
 
 
