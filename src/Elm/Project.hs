@@ -4,7 +4,6 @@ module Elm.Project
   , read
   , write
 
-  , getDirectDeps
   , appSolution
 
   , get
@@ -81,11 +80,6 @@ checkOverlap deps tests =
 
 
 -- DEPENDENCIES
-
-
-getDirectDeps :: Project -> Set Name
-getDirectDeps project =
-  get (Map.keysSet . _app_deps) (Map.keysSet . _pkg_deps) project
 
 
 appSolution :: AppInfo -> Map Name Version

@@ -7,11 +7,13 @@ module Stuff.Verify
 
 
 import qualified Data.Map as Map
+import Data.Map (Map)
 
-import qualified Elm.Compiler as Compiler
+import Elm.Package (Name, Version)
 
 import qualified Deps.Verify as Verify
-import Elm.Project (Project(..), AppInfo(..), PkgInfo(..))
+import Elm.Project (Project(..), PkgInfo(..))
+import qualified Elm.Project as Project
 import qualified Elm.Project.Constraint as Con
 import qualified File.IO as IO
 import qualified Reporting.Task as Task
@@ -23,57 +25,57 @@ import qualified Stuff.Paths as Path
 -- VERIFY
 
 
-verify :: Project -> Task.Task Deps.Info
+verify :: Project -> Task.Task Deps.Summary
 verify project =
-  do  exists1 <- IO.exists Path.pkgInfo
-      exists2 <- IO.exists Path.deps
-      if not exists1 || not exists2
-        then
-          rebuildCache project
+  do  fresh <-
+        IO.andM
+          [ IO.exists Path.solution
+          , IO.exists Path.summary
+          , checkSolution project
+          ]
 
-        else
-          do  cacheProject <- IO.readBinary Path.pkgInfo
-              let valid = isValid cacheProject project
-              if valid
-                then IO.readBinary Path.deps
-                else rebuildCache project
+      if fresh
+        then IO.readBinary Path.summary
+        else rebuildCache project
 
 
-
--- DOES PROJECT MATCH CACHE?
-
-
-isValid :: Project -> Project -> Bool
-isValid p1 p2 =
-  case (p1, p2) of
-    (App info1, App info2) ->
-      _app_deps info1 == _app_deps info2
-      && _app_elm_version info1 == _app_elm_version info2
-      && _app_elm_version info1 == Compiler.version
-
-    (Pkg info1, Pkg info2) ->
-      _pkg_transitive_deps info1 == _pkg_transitive_deps info2
-      && _pkg_dependencies info1 == _pkg_dependencies info2
-      && _pkg_test_deps info1 == _pkg_test_deps info2
-      && _pkg_elm_version info1 == _pkg_elm_version info2
-      && Con.goodElm (_pkg_elm_version info1)
-
-    _ ->
-      False
-
-
-
--- ACTUALLY VALIDATE
-
-
-rebuildCache :: Project -> Task.Task Deps.Info
+rebuildCache :: Project -> Task.Task Deps.Summary
 rebuildCache project =
-  do  IO.remove Path.pkgInfo
-      IO.remove Path.deps
+  do  IO.remove Path.solution
+      IO.remove Path.summary
 
-      depsInfo <- Map.elems <$> Verify.verify project
+      (solution, summary) <- Verify.verify project
 
-      IO.writeBinary Path.pkgInfo project
-      IO.writeBinary Path.deps depsInfo
-      return (Deps.Info depsInfo)
+      IO.writeBinary Path.solution solution
+      IO.writeBinary Path.summary summary
+      return summary
 
+
+
+-- CHECK SOLUTION
+
+
+checkSolution :: Project -> Task.Task Bool
+checkSolution project =
+  checkSolutionHelp project <$> IO.readBinary Path.solution
+
+
+checkSolutionHelp :: Project -> Map Name Version -> Bool
+checkSolutionHelp project solution =
+  case project of
+    App info ->
+      solution == Project.appSolution info
+
+    Pkg info ->
+      allGood (_pkg_test_deps info) solution
+      && allGood (_pkg_deps info) solution
+
+
+allGood :: Map Name Con.Constraint -> Map Name Version -> Bool
+allGood cons vsns =
+  let
+    bools =
+      Map.intersectionWith Con.satisfies cons vsns
+  in
+    Map.size cons == Map.size bools
+    && Map.foldr (&&) True bools

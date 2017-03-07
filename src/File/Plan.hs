@@ -23,6 +23,7 @@ import Elm.Project (Project)
 import qualified Elm.Project as Project
 import qualified File.Crawl as Crawl
 import qualified Reporting.Task as Task
+import qualified Stuff.Deps as Deps
 import qualified Stuff.Paths
 
 
@@ -33,8 +34,8 @@ import qualified Stuff.Paths
 type Dict value = Map.Map Module.Raw value
 
 
-plan :: FilePath -> Project -> Crawl.Graph -> Task.Task (Dict Info, Module.Interfaces)
-plan root project (Crawl.Graph locals _ foreigns _) =
+plan :: FilePath -> Project -> Deps.Summary -> Crawl.Graph -> Task.Task (Dict Info, Module.Interfaces)
+plan root project depsSummary (Crawl.Graph locals _ foreigns _) =
   liftIO $
   do  queue <- newChan
       let env = Env queue root (Project.getName project)
@@ -47,8 +48,7 @@ plan root project (Crawl.Graph locals _ foreigns _) =
         do  graph <- Map.traverseMaybeWithKey (\_ -> readMVar) statusMVars
             writeChan queue (EndLoop graph)
 
-      -- TODO load all the cached interfaces for deps
-      ifaceLoader queue Map.empty
+      ifaceLoader queue (Deps._ifaces depsSummary)
 
 
 data Env =

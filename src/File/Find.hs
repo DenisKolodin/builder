@@ -37,12 +37,12 @@ data Asset
 -- FIND
 
 
-find :: FilePath -> Project -> Deps.Modules -> Module.Raw -> Task.Task_ E.Error Asset
-find root project depsModules name =
+find :: FilePath -> Project -> Deps.ExposedModules -> Module.Raw -> Task.Task_ E.Error Asset
+find root project exposedModules name =
   do
       codePaths <- liftIO $ getCodePaths root project name
 
-      case (codePaths, Map.lookup name depsModules) of
+      case (codePaths, Map.lookup name exposedModules) of
         ([Elm path], Nothing) ->
             return (Local path)
 

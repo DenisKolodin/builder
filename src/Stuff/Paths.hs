@@ -1,7 +1,6 @@
 module Stuff.Paths
   ( solution
-  , exposed
-  , ifaces
+  , summary
   , elmi
   , elmo
   )
@@ -30,14 +29,9 @@ solution =
   stuff </> "solution.dat"
 
 
-exposed :: FilePath
-exposed =
-  stuff </> "exposed.dat"
-
-
-ifaces :: FilePath
-ifaces =
-  stuff </> "ifaces.dat"
+summary :: FilePath
+summary =
+  stuff </> "summary.dat"
 
 
 

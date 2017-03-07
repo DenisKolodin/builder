@@ -7,6 +7,7 @@ module Reporting.Task
   , getPackageCacheDirFor
   , report
   , getReporter
+  , getSilentRunner
   , workerMVar
   , workerChan
   , fetch, fetchFromInternet, makeUrl
@@ -110,6 +111,17 @@ report progress =
 getReporter :: Task Progress.Reporter
 getReporter =
   asks _reporter
+
+
+
+-- RUNNER
+
+
+getSilentRunner :: Task_ x (Task_ e a -> IO (Either e a))
+getSilentRunner =
+  do  env <- ask
+      let silentEnv = env { _reporter = \_ -> return () }
+      return $ \task -> runReaderT (runExceptT task) silentEnv
 
 
 

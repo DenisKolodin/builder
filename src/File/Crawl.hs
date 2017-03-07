@@ -12,7 +12,6 @@ import Control.Monad (forM_)
 import Control.Monad.Except (liftIO)
 import qualified Data.Graph as Graph
 import qualified Data.Map as Map
-import System.FilePath ((</>))
 
 import qualified Elm.Compiler as Compiler
 import qualified Elm.Compiler.Module as Module
@@ -57,14 +56,14 @@ empty =
 -- CRAWL PROJECT
 
 
-crawl :: FilePath -> Project -> Deps.Info -> Task.Task Graph
-crawl root project depsInfo =
+crawl :: FilePath -> Project -> Deps.Summary -> Task.Task Graph
+crawl root project summary =
   let
     environment =
       Env
         { _root = root
         , _project = project
-        , _depsModules = Deps.getModules project depsInfo
+        , _exposed = Deps._exposed summary
         }
 
     unvisited =
@@ -80,7 +79,7 @@ data Env =
   Env
     { _root :: FilePath
     , _project :: Project
-    , _depsModules :: Deps.Modules
+    , _exposed :: Deps.ExposedModules
     }
 
 
@@ -167,9 +166,9 @@ data Asset
 
 
 crawlFile :: Env -> Unvisited -> Task.Task_ (Module.Raw, E.Error) Asset
-crawlFile env@(Env root project depsModules) (Unvisited maybeParent name) =
+crawlFile env@(Env root project exposed) (Unvisited maybeParent name) =
   Task.mapError ((,) name) $
-    do  asset <- Find.find root project depsModules name
+    do  asset <- Find.find root project exposed name
         case asset of
           Find.Local path ->
             readValidHeader env name path
