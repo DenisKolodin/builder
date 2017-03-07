@@ -2,6 +2,7 @@ module File.IO
   ( writeBinary, readBinary
   , writeUtf8, readUtf8
   , remove, exists
+  , andM
   )
   where
 
@@ -113,3 +114,18 @@ remove filePath =
 exists :: FilePath -> Task.Task Bool
 exists filePath =
   liftIO $ doesFileExist filePath
+
+
+
+-- HELPER
+
+
+andM :: (Monad m) => [m Bool] -> m Bool
+andM checks =
+  case checks of
+    [] ->
+      return True
+
+    check : otherChecks ->
+      do  bool <- check
+          if bool then andM otherChecks else return False
