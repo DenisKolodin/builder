@@ -1,19 +1,15 @@
 {-# OPTIONS_GHC -Wall #-}
-{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE OverloadedStrings #-}
 module Elm.Project.Internal
   ( Project(..)
   , AppInfo(..)
   , PkgInfo(..)
-  , TransitiveDeps(..)
   , Bundles(..)
   , parse
   )
   where
 
-import Data.Binary (Binary)
 import Data.Text (Text)
-import GHC.Generics (Generic)
 import Prelude hiding (read)
 import qualified Data.Aeson as Aeson
 import qualified Data.ByteString.Lazy as BS
@@ -38,7 +34,6 @@ import qualified Utils.Json as Json
 data Project
   = App AppInfo
   | Pkg PkgInfo
-  deriving (Eq, Generic)
 
 
 
@@ -52,23 +47,15 @@ data AppInfo =
     , _app_bundles :: Bundles
     , _app_source_dir :: FilePath
     , _app_output_dir :: FilePath
-    , _app_deps :: TransitiveDeps
+    , _app_deps :: Map Name Version
+    , _app_test_deps :: Map Name Version
+    , _app_trans_deps :: Map Name Version
     }
-    deriving (Eq, Generic)
-
-
-data TransitiveDeps =
-  TransitiveDeps
-    { _direct :: Map Name Version
-    , _trans :: Map Name Version
-    , _test_direct :: Map Name Version
-    , _test_trans :: Map Name Version
-    }
-    deriving (Eq, Generic)
+    deriving (Eq)
 
 
 data Bundles = Bundles [[Name]]
-  deriving (Eq, Generic)
+  deriving (Eq)
 
 
 
@@ -82,29 +69,17 @@ data PkgInfo =
     , _pkg_license :: Licenses.License
     , _pkg_version :: Version
     , _pkg_exposed :: [Module.Raw]
-    , _pkg_dependencies :: Constraints
+    , _pkg_deps :: Constraints
     , _pkg_test_deps :: Constraints
-    , _pkg_transitive_deps :: TransitiveDeps
     , _pkg_elm_version :: C.Constraint
     , _pkg_natives :: Bool
     , _pkg_effects :: Bool
     }
-    deriving (Eq, Generic)
+    deriving (Eq)
 
 
 type Constraints =
   Map Name C.Constraint
-
-
-
--- BINARY
-
-
-instance Binary Project
-instance Binary AppInfo
-instance Binary PkgInfo
-instance Binary Bundles
-instance Binary TransitiveDeps
 
 
 
@@ -156,16 +131,9 @@ appDecoder =
     <*> Json.field "bundles" bundlesDecoder
     <*> Json.field "source-directory" dirDecoder
     <*> Json.field "output-directory" dirDecoder
-    <*> appDepsDecoder
-
-
-appDepsDecoder :: Json.Decoder TransitiveDeps
-appDepsDecoder =
-  TransitiveDeps
-    <$> Json.field "dependencies" (depsDecoder versionDecoder)
+    <*> Json.field "dependencies" (depsDecoder versionDecoder)
     <*> Json.field "test-dependencies" (depsDecoder versionDecoder)
     <*> Json.at ["do-not-edit-this-by-hand", "transitive-dependencies"] (depsDecoder versionDecoder)
-    <*> Json.at ["do-not-edit-this-by-hand", "transitive-test-dependencies"] (depsDecoder versionDecoder)
 
 
 
@@ -182,7 +150,6 @@ pkgDecoder =
     <*> Json.field "exposed-modules" exposedDecoder
     <*> Json.field "dependencies" (depsDecoder constraintDecoder)
     <*> Json.field "test-dependencies" (depsDecoder constraintDecoder)
-    <*> Json.field "do-not-edit-this-by-hand" pkgTransitiveDepsDecoder
     <*> Json.field "elm-version" constraintDecoder
     <*> flag "native-modules"
     <*> flag "effect-modules"
@@ -192,15 +159,6 @@ flag :: Text -> Json.Decoder Bool
 flag name =
   maybe False id <$>
     Json.maybe (Json.field name Json.bool)
-
-
-pkgTransitiveDepsDecoder :: Json.Decoder TransitiveDeps
-pkgTransitiveDepsDecoder =
-  TransitiveDeps
-    <$> Json.field "dependencies" (depsDecoder versionDecoder)
-    <*> Json.field "test-dependencies" (depsDecoder versionDecoder)
-    <*> Json.field "transitive-dependencies" (depsDecoder versionDecoder)
-    <*> Json.field "transitive-test-dependencies" (depsDecoder versionDecoder)
 
 
 
