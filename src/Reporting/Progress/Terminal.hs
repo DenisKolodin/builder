@@ -6,6 +6,7 @@ module Reporting.Progress.Terminal
 
 import Control.Concurrent (forkIO)
 import Control.Concurrent.Chan (newChan, readChan, writeChan)
+import qualified System.Info as System
 import System.IO (hFlush, hPutStr, stdout)
 import Text.PrettyPrint.ANSI.Leijen
   ( Doc, (<>), (<+>), displayIO, green, red, renderPretty, text
@@ -81,7 +82,7 @@ step progress state@(State total good bad) =
           return state
 
     DownloadEnd Good ->
-      do  putStrLn "\nPackages configured successfully!"
+      do  putStrLn ""
           return state
 
 
@@ -165,11 +166,19 @@ makeBullet name version outcome =
 
     bullet =
       case outcome of
-        Good ->
-          green (text "●")
-
-        Bad ->
-          red (text "✗")
+        Good -> good
+        Bad -> bad
   in
     text "  " <> bullet <+> nm <+> vsn <> text "\n"
 
+
+good :: Doc
+good =
+  green $ text $
+    if System.os == "windows" then "+" else "●"
+
+
+bad :: Doc
+bad =
+  red $ text $
+    if System.os == "windows" then "X" else "✗"
