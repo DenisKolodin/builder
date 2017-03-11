@@ -58,7 +58,7 @@ compileAll project ifaces modules =
 
 data Answer
   = Blocked
-  | Bad FilePath Text [Compiler.Error]
+  | Bad FilePath Text Compiler.Localizer [Compiler.Error]
   | Good Compiler.Result
 
 
@@ -80,13 +80,13 @@ sortAnswersHelp acc name answer =
     Blocked ->
       acc
 
-    Bad path src errors ->
+    Bad path src localizer errors ->
       case acc of
         Left dict ->
-          Left (Map.insert name (E.Error path src errors) dict)
+          Left (Map.insert name (E.Error path src localizer errors) dict)
 
         Right _ ->
-          Left (Map.singleton name (E.Error path src errors))
+          Left (Map.singleton name (E.Error path src localizer errors))
 
     Good result ->
       case acc of
@@ -129,7 +129,7 @@ compile reporter project answersMVar ifacesMVar name info =
                     case Compiler.compile context source of
                       (localizer, warnings, Left errors) ->
                         do  reporter (Progress.CompileFileEnd name Progress.Bad)
-                            putMVar mvar (Bad path source errors)
+                            putMVar mvar (Bad path source localizer errors)
 
                       (localizer, warnings, Right result@(Compiler.Result _ iface _)) ->
                         do  reporter (Progress.CompileFileEnd name Progress.Good)
@@ -191,7 +191,7 @@ anyBlock answers =
     Blocked : _ ->
       True
 
-    Bad _ _ _ : _ ->
+    Bad _ _ _ _ : _ ->
       True
 
     Good _ : otherAnswers ->

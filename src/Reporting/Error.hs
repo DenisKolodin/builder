@@ -115,7 +115,7 @@ toDoc err =
       error ("TODO cycle " ++ show names)
 
     Compile errors ->
-      error ("TODO compile " ++ show (Map.keys errors))
+      error ("TODO compile " ++ show (map Compile.toDocs (Map.elems errors)))
 
     AppBadElm version ->
       error ("TODO AppBadElm - " ++ Pkg.versionToString version)
