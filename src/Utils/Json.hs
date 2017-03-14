@@ -1,11 +1,13 @@
 {-# OPTIONS_GHC -Wall #-}
 {-# LANGUAGE OverloadedStrings #-}
 module Utils.Json
-  ( Decoder, Error(..), decode
+  ( Decoder, Error(..), decode, parse
   , text, bool, int, float
   , list, dict, maybe
   , field, at
   , map, map2, succeed, fail, andThen
+  -- elm specific stuff
+  , moduleName, packageName
   )
   where
 
@@ -15,10 +17,14 @@ import Prelude hiding (fail, map, maybe)
 
 import qualified Control.Monad as Monad
 import qualified Data.Aeson as Aeson
+import qualified Data.ByteString.Lazy as BS
 import qualified Data.HashMap.Lazy as HashMap
 import qualified Data.Scientific as Scientific
 import qualified Data.Text as Text
 import qualified Data.Vector as Vector
+
+import qualified Elm.Compiler.Module as Module
+import qualified Elm.Package as Pkg
 
 
 
@@ -40,6 +46,21 @@ data Error
 decode :: Decoder a -> Aeson.Value -> Either Error a
 decode decoder value =
   _run decoder id value
+
+
+parse :: Decoder a -> BS.ByteString -> Either (Maybe Error) a
+parse decoder bytestring =
+  case Aeson.eitherDecode bytestring of
+    Left _ ->
+      Left Nothing
+
+    Right json ->
+      case decode decoder json of
+        Left err ->
+          Left (Just err)
+
+        Right value ->
+          Right value
 
 
 
@@ -230,3 +251,30 @@ andThen callback (Decoder runA) =
     do  a <- runA mkError value
         let (Decoder runB) = callback a
         runB mkError value
+
+
+
+-- ELM SPECIFIC STUFF
+
+
+moduleName :: Decoder Module.Raw
+moduleName =
+  do  txt <- text
+      case Module.nameFromText txt of
+        Nothing ->
+          fail "a module name like \"Html.Events\""
+
+        Just name ->
+          succeed name
+
+
+packageName :: Decoder Pkg.Name
+packageName =
+  do  txt <- text
+      case Pkg.fromText txt of
+        Left _ ->
+          fail "a valid project name, like \"elm-lang/core\""
+
+        Right name ->
+          succeed name
+

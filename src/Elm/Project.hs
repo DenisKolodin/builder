@@ -8,10 +8,9 @@ module Elm.Project
 
   , get
   , getName
-  , getSourceDir
-  , getNative
+  , getSourceDirs
+  , getKernel
   , getEffect
-  , getRoots
   )
   where
 
@@ -22,7 +21,6 @@ import qualified Data.Map as Map
 import Data.Map (Map)
 import Data.Set (Set)
 
-import qualified Elm.Compiler.Module as Module
 import qualified Elm.Package as Pkg
 import Elm.Package (Name, Version)
 
@@ -114,22 +112,17 @@ get appFunc pkgFunc project =
       pkgFunc info
 
 
-getSourceDir :: Project -> FilePath
-getSourceDir project =
-  get _app_source_dir (const "src") project
+getSourceDirs :: Project -> [FilePath]
+getSourceDirs project =
+  get _app_source_dirs (\_ -> ["src"]) project
 
 
-getNative :: Project -> Bool
-getNative project =
-  get (const False) _pkg_natives project
+getKernel :: Project -> Bool
+getKernel project =
+  get (const False) _pkg_kernels project
 
 
 getEffect :: Project -> Bool
 getEffect project =
   get (const False) _pkg_effects project
-
-
-getRoots :: Project -> [Module.Raw]
-getRoots project =
-  get _app_pages _pkg_exposed project
 

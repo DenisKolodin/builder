@@ -4,14 +4,12 @@ module Elm.Project.Internal
   ( Project(..)
   , AppInfo(..)
   , PkgInfo(..)
-  , Bundles(..)
   , parse
   )
   where
 
 import Data.Text (Text)
 import Prelude hiding (read)
-import qualified Data.Aeson as Aeson
 import qualified Data.ByteString.Lazy as BS
 import qualified Data.HashMap.Lazy as HashMap
 import qualified Data.Map as Map
@@ -43,19 +41,11 @@ data Project
 data AppInfo =
   AppInfo
     { _app_elm_version :: Version
-    , _app_pages :: [Module.Raw]
-    , _app_bundles :: Bundles
-    , _app_source_dir :: FilePath
-    , _app_output_dir :: FilePath
+    , _app_source_dirs :: [FilePath]
     , _app_deps :: Map Name Version
     , _app_test_deps :: Map Name Version
     , _app_trans_deps :: Map Name Version
     }
-    deriving (Eq)
-
-
-data Bundles = Bundles [[Name]]
-  deriving (Eq)
 
 
 
@@ -69,17 +59,12 @@ data PkgInfo =
     , _pkg_license :: Licenses.License
     , _pkg_version :: Version
     , _pkg_exposed :: [Module.Raw]
-    , _pkg_deps :: Constraints
-    , _pkg_test_deps :: Constraints
+    , _pkg_deps :: Map Name C.Constraint
+    , _pkg_test_deps :: Map Name C.Constraint
     , _pkg_elm_version :: C.Constraint
-    , _pkg_natives :: Bool
+    , _pkg_kernels :: Bool
     , _pkg_effects :: Bool
     }
-    deriving (Eq)
-
-
-type Constraints =
-  Map Name C.Constraint
 
 
 
@@ -88,17 +73,7 @@ type Constraints =
 
 parse :: BS.ByteString -> Either (Maybe Json.Error) Project
 parse bytestring =
-  case Aeson.eitherDecode bytestring of
-    Left _ ->
-      Left Nothing
-
-    Right value ->
-      case Json.decode projectDecoder value of
-        Left err ->
-          Left (Just err)
-
-        Right project ->
-          Right project
+  Json.parse projectDecoder bytestring
 
 
 
@@ -127,10 +102,7 @@ appDecoder :: Json.Decoder AppInfo
 appDecoder =
   AppInfo
     <$> Json.field "elm-version" versionDecoder
-    <*> Json.field "pages" pagesDecoder
-    <*> Json.field "bundles" bundlesDecoder
-    <*> Json.field "source-directory" dirDecoder
-    <*> Json.field "output-directory" dirDecoder
+    <*> Json.field "source-directory" (Json.list dirDecoder)
     <*> Json.field "dependencies" (depsDecoder versionDecoder)
     <*> Json.field "test-dependencies" (depsDecoder versionDecoder)
     <*> Json.at ["do-not-edit-this-by-hand", "transitive-dependencies"] (depsDecoder versionDecoder)
@@ -143,7 +115,7 @@ appDecoder =
 pkgDecoder :: Json.Decoder PkgInfo
 pkgDecoder =
   PkgInfo
-    <$> Json.field "name" pkgNameDecoder
+    <$> Json.field "name" Json.packageName
     <*> Json.field "summary" summaryDecoder
     <*> Json.field "license" licenseDecoder
     <*> Json.field "version" versionDecoder
@@ -151,7 +123,7 @@ pkgDecoder =
     <*> Json.field "dependencies" (depsDecoder constraintDecoder)
     <*> Json.field "test-dependencies" (depsDecoder constraintDecoder)
     <*> Json.field "elm-version" constraintDecoder
-    <*> flag "native-modules"
+    <*> flag "kernel-modules"
     <*> flag "effect-modules"
 
 
@@ -210,11 +182,6 @@ dirDecoder =
           Json.succeed (Text.unpack txt)
 
 
-pagesDecoder :: Json.Decoder [Module.Raw]
-pagesDecoder =
-  Json.list moduleNameDecoder
-
-
 summaryDecoder :: Json.Decoder Text
 summaryDecoder =
   do  summary <- Json.text
@@ -234,33 +201,6 @@ licenseDecoder =
           Json.succeed license
 
 
-pkgNameDecoder :: Json.Decoder Name
-pkgNameDecoder =
-  do  txt <- Json.text
-      case Pkg.fromText txt of
-        Left _ ->
-          Json.fail "a valid project name"
-
-        Right name ->
-          Json.succeed name
-
-
-bundlesDecoder :: Json.Decoder Bundles
-bundlesDecoder =
-  Bundles <$> Json.list (Json.list pkgNameDecoder)
-
-
 exposedDecoder :: Json.Decoder [Module.Raw]
 exposedDecoder =
-  Json.list moduleNameDecoder
-
-
-moduleNameDecoder :: Json.Decoder Module.Raw
-moduleNameDecoder =
-  do  txt <- Json.text
-      case Module.nameFromText txt of
-        Nothing ->
-          Json.fail "a module name like \"Json.Decode\""
-
-        Just name ->
-          Json.succeed name
+  Json.list Json.moduleName

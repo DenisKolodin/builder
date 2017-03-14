@@ -63,6 +63,7 @@ Library
         Deps.Solver.Internal,
         Deps.Verify,
         Deps.Website,
+        Elm.Project.BuildPlan,
         Elm.Project.Internal,
         File.Find,
         Reporting.Error.Assets,
