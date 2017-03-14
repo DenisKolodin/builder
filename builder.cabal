@@ -42,7 +42,7 @@ Library
         src
 
     exposed-modules:
-        Elm.Assets,
+        Elm.PerUserCache,
         Elm.Project,
         Elm.Project.Constraint,
         Elm.Project.Licenses,

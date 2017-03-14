@@ -1,5 +1,5 @@
 {-# OPTIONS_GHC -Wall #-}
-module Elm.Assets
+module Elm.PerUserCache
   ( getPackageRoot
   , getReplRoot
   , getMakeRoot
