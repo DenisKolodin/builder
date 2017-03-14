@@ -2,7 +2,6 @@
 module Elm.PerUserCache
   ( getPackageRoot
   , getReplRoot
-  , getMakeRoot
   )
   where
 
@@ -26,11 +25,6 @@ getPackageRoot =
 getReplRoot :: IO FilePath
 getReplRoot =
   getRoot "repl"
-
-
-getMakeRoot :: IO FilePath
-getMakeRoot =
-  getRoot "make"
 
 
 getRoot :: FilePath -> IO FilePath
