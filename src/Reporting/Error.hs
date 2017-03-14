@@ -16,7 +16,6 @@ import Text.PrettyPrint.ANSI.Leijen
   , fillSep, indent, red, text, vcat
   )
 
-import qualified Elm.Assets as Assets
 import qualified Elm.Compiler as Compiler
 import qualified Elm.Compiler.Module as Module
 import qualified Elm.Package as Pkg

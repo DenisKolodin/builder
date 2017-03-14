@@ -32,10 +32,10 @@ import qualified Network.HTTP.Types as Http
 import System.Directory (createDirectoryIfMissing)
 import System.FilePath ((</>))
 
-import qualified Elm.Assets as Assets
 import qualified Elm.Compiler as Compiler
-import qualified Elm.Package as Pkg
 import Elm.Package (Name, Version)
+import qualified Elm.Package as Pkg
+import qualified Elm.PerUserCache as PerUserCache
 import qualified Reporting.Error as Error
 import qualified Reporting.Progress as Progress
 
@@ -64,7 +64,7 @@ data Env =
 run :: Progress.Reporter -> Task a -> IO (Either Error.Error a)
 run reporter task =
   Network.withSocketsDo $
-    do  root <- Assets.getPackageRoot
+    do  root <- PerUserCache.getPackageRoot
         pool <- initPool 4
         httpManager <- Http.newManager Http.tlsManagerSettings
         let env = Env root pool httpManager reporter
