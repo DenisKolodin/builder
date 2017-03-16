@@ -8,10 +8,11 @@ module File.Crawl
   where
 
 import Control.Concurrent.Chan (Chan, newChan, readChan)
-import Control.Monad (forM_)
+import Control.Monad (foldM, forM_)
 import Control.Monad.Except (liftIO)
 import qualified Data.Graph as Graph
 import qualified Data.Map as Map
+import qualified Data.Set as Set
 
 import qualified Elm.Compiler as Compiler
 import qualified Elm.Compiler.Module as Module
@@ -73,11 +74,9 @@ crawl summary@(Summary _ project _ _) =
 
 dfs :: Summary -> [Unvisited] -> Task.Task Graph
 dfs summary unvisited =
-  do  chan <- liftIO $ newChan
+  do  chan <- liftIO newChan
 
-      graph <-
-        do  mapM_ (Task.workerChan chan . crawlFile summary) unvisited
-            dfsHelp summary chan (length unvisited) empty
+      graph <- dfsHelp summary chan 0 Set.empty unvisited empty
 
       if Map.null (_problems graph)
         then return graph
@@ -87,49 +86,50 @@ dfs summary unvisited =
 type FileResult = Either (Module.Raw, E.Error) Asset
 
 
-dfsHelp :: Summary -> Chan FileResult -> Int -> Graph -> Task.Task Graph
-dfsHelp summary chan pendingWork graph =
-  if pendingWork == 0 then
-    return graph
+dfsHelp :: Summary -> Chan FileResult -> Int -> Set.Set Module.Raw -> [Unvisited] -> Graph -> Task.Task Graph
+dfsHelp summary chan oldPending oldSeen unvisited graph =
+  do  (seen, pending) <-
+        foldM (crawlNew summary chan) (oldSeen, oldPending) unvisited
 
+      if pending == 0
+        then return graph
+        else
+          do  asset <- liftIO $ readChan chan
+              case asset of
+                Right (Local name info) ->
+                  do  let locals = Map.insert name info (_locals graph)
+                      let newGraph = graph { _locals = locals }
+                      let deps = map (Unvisited (Just name)) (_deps info)
+                      dfsHelp summary chan (pending - 1) seen deps newGraph
+
+                Right (Native name path) ->
+                  do  let natives = Map.insert name path (_natives graph)
+                      let newGraph = graph { _natives = natives }
+                      dfsHelp summary chan (pending - 1) seen [] newGraph
+
+                Right (Foreign name pkg vsn) ->
+                  do  let foreigns = Map.insert name (pkg, vsn) (_foreigns graph)
+                      let newGraph = graph { _foreigns = foreigns }
+                      dfsHelp summary chan (pending - 1) seen [] newGraph
+
+                Left (name, err) ->
+                  do  let problems = Map.insert name err (_problems graph)
+                      let newGraph = graph { _problems = problems }
+                      dfsHelp summary chan (pending - 1) seen [] newGraph
+
+
+crawlNew
+  :: Summary
+  -> Chan FileResult
+  -> (Set.Set Module.Raw, Int)
+  -> Unvisited
+  -> Task.Task (Set.Set Module.Raw, Int)
+crawlNew summary chan (seen, n) unvisited@(Unvisited _ name) =
+  if Set.member name seen then
+    return (seen, n)
   else
-    do  asset <- liftIO $ readChan chan
-        case asset of
-          Right (Local name node) ->
-            do  let locals = Map.insert name node (_locals graph)
-                let newGraph = graph { _locals = locals }
-                let deps = filter (isNew newGraph) (_deps node)
-                forM_ deps $ \dep ->
-                  Task.workerChan chan $
-                    crawlFile summary (Unvisited (Just name) dep)
-                let newPending = pendingWork - 1 + length deps
-                dfsHelp summary chan newPending newGraph
-
-          Right (Native name path) ->
-            do  let natives = Map.insert name path (_natives graph)
-                let newGraph = graph { _natives = natives }
-                let newPending = pendingWork - 1
-                dfsHelp summary chan newPending newGraph
-
-          Right (Foreign name pkg vsn) ->
-            do  let foreigns = Map.insert name (pkg, vsn) (_foreigns graph)
-                let newGraph = graph { _foreigns = foreigns }
-                let newPending = pendingWork - 1
-                dfsHelp summary chan newPending newGraph
-
-          Left (name, err) ->
-            do  let problems = Map.insert name err (_problems graph)
-                let newGraph = graph { _problems = problems }
-                let newPending = pendingWork - 1
-                dfsHelp summary chan newPending newGraph
-
-
-isNew :: Graph -> Module.Raw -> Bool
-isNew (Graph locals natives foreigns problems) name =
-  Map.notMember name locals
-  && Map.notMember name natives
-  && Map.notMember name foreigns
-  && Map.notMember name problems
+    do  Task.workerChan chan (crawlFile summary unvisited)
+        return (Set.insert name seen, n + 1)
 
 
 
@@ -155,7 +155,7 @@ crawlFile summary (Unvisited maybeParent name) =
     do  asset <- Find.find summary name
         case asset of
           Find.Local path ->
-            readValidHeader summary name path
+            readModuleHeader summary name path
 
           Find.Native path ->
             return (Native name path)
@@ -168,30 +168,32 @@ crawlFile summary (Unvisited maybeParent name) =
 -- READ HEADER
 
 
-type HReader a = Task.Task_ E.Error a
+type ATask a = Task.Task_ E.Error a
 
 
-readValidHeader :: Summary -> Module.Raw -> FilePath -> HReader Asset
-readValidHeader summary expectedName path =
-  do  let pkg = Project.getName (_project summary)
-      source <- liftIO (IO.readUtf8 path)
-
-      (tag, name, deps) <-
-        -- TODO get regions on data extracted here
-        case Compiler.parseDependencies pkg source of
-          Right result ->
-            return result
-
-          Left msg ->
-            Task.throw (E.BadHeader path msg)
-
+readModuleHeader :: Summary -> Module.Raw -> FilePath -> ATask Asset
+readModuleHeader summary expectedName path =
+  do  (name, deps) <- readHeader (_project summary) path
       checkName path expectedName name
-      checkTag (_project summary) path tag
-
       return (Local name (Info path deps))
 
 
-checkName :: FilePath -> Module.Raw -> Module.Raw -> HReader ()
+readHeader :: Project -> FilePath -> ATask (Module.Raw, [Module.Raw])
+readHeader project path =
+  do  let pkg = Project.getName project
+      source <- liftIO (IO.readUtf8 path)
+
+      -- TODO get regions on data extracted here
+      case Compiler.parseDependencies pkg source of
+        Right (tag, name, deps) ->
+          do  checkTag project path tag
+              return (name, deps)
+
+        Left msg ->
+          Task.throw (E.BadHeader path msg)
+
+
+checkName :: FilePath -> Module.Raw -> Module.Raw -> ATask ()
 checkName path expectedName actualName =
   if expectedName == actualName then
     return ()
@@ -200,7 +202,7 @@ checkName path expectedName actualName =
     Task.throw (E.BadName path actualName)
 
 
-checkTag :: Project -> FilePath -> Compiler.Tag -> HReader ()
+checkTag :: Project -> FilePath -> Compiler.Tag -> ATask ()
 checkTag project path tag =
   case tag of
     Compiler.Normal ->
