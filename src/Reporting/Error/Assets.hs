@@ -50,33 +50,24 @@ toDoc err =
     BadElmJson problem ->
       case problem of
         BadSyntax ->
-          Help.makeErrorDoc
-            ("Your elm.json is not valid JSON.")
-            [ reflow "Maybe a comma is missing? Or a closing } or ]?"
-            ]
+          badSyntax "elm.json"
 
-        BadStructure jsonError ->
-          let
-            (location, json, expecting) =
-              getJsonErrorInfo jsonError "project"
-          in
-            Help.makeErrorDoc ("Problem in your elm.json file.") $
-              if location == "project" then
-                [ text "I was expecting" <+> green (text expecting) <> text "."
-                ]
-
-              else
-                [ fillSep $
-                    text "I was expecting"
-                    : map (green . text) (words expecting)
-                    ++
-                      [ text "at"
-                      , dullyellow (text location)
-                      ]
-                ]
+        BadStructure decodeError ->
+          decodeErrorToDoc "elm.json" decodeError
 
         BadContent ->
           error "TODO bad json bad content"
+
+    BadBuildPlan problem ->
+      case problem of
+        BadSyntax ->
+          badSyntax "elm-build-plan.json"
+
+        BadStructure decodeError ->
+          decodeErrorToDoc "elm-build-plan.json" decodeError
+
+        BadContent ->
+          error "TODO bad elm-build-plan.json"
 
     CorruptDocumentation problem ->
       Help.makeErrorDoc "CorruptDocumentation" [ text "TODO" ]
@@ -94,6 +85,41 @@ toDoc err =
 
     CorruptBinary path ->
       Help.makeErrorDoc "CorruptBinary" [ text $ "TODO " ++ path ]
+
+
+
+-- JSON ERROR
+
+
+badSyntax :: FilePath -> Doc
+badSyntax path =
+  Help.makeErrorDoc
+    ("Your " ++ path ++ " is not valid JSON.")
+    [ reflow "Maybe a comma is missing? Or a closing } or ]?"
+    ]
+
+
+
+decodeErrorToDoc :: FilePath -> Decode.Error -> Doc
+decodeErrorToDoc path err =
+  let
+    (location, json, expecting) =
+      getJsonErrorInfo err "project"
+  in
+    Help.makeErrorDoc ("Problem in your " ++ path ++ " file.") $
+      if location == "project" then
+        [ text "I was expecting" <+> green (text expecting) <> text "."
+        ]
+
+      else
+        [ fillSep $
+            text "I was expecting"
+            : map (green . text) (words expecting)
+            ++
+              [ text "at"
+              , dullyellow (text location)
+              ]
+        ]
 
 
 getJsonErrorInfo :: Decode.Error -> String -> (String, Aeson.Value, String)
