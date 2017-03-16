@@ -2,18 +2,20 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Reporting.Error.Assets
   ( Error(..)
+  , JsonProblem(..)
   , toDoc
   )
   where
 
 import qualified Data.Aeson as Aeson
+import qualified Data.Set as Set
 import qualified Data.Text as Text
 import Text.PrettyPrint.ANSI.Leijen
   ( Doc, (<+>), (<>), dullyellow, fillSep, green, indent, text, vcat )
 
 import qualified Elm.Package as Pkg
 
-import qualified Utils.Json as Json
+import qualified Json.Decode as Decode
 import qualified Reporting.Error.Help as Help
 import Reporting.Error.Help (reflow)
 
@@ -23,11 +25,19 @@ import Reporting.Error.Help (reflow)
 
 
 data Error
-  = BadElmJson FilePath (Maybe Json.Error)
+  = BadElmJson JsonProblem
+  | BadBuildPlan JsonProblem
+  | CorruptElmJson Pkg.Name Pkg.Version
   | CorruptDocumentation String
   | CorruptVersionCache Pkg.Name
   | PackageNotFound Pkg.Name [Pkg.Name]
   | CorruptBinary FilePath
+
+
+data JsonProblem
+  = BadSyntax
+  | BadStructure Decode.Error
+  | BadContent
 
 
 
@@ -37,20 +47,20 @@ data Error
 toDoc :: Error -> Doc
 toDoc err =
   case err of
-    BadElmJson path maybeProblem ->
-      case maybeProblem of
-        Nothing ->
+    BadElmJson problem ->
+      case problem of
+        BadSyntax ->
           Help.makeErrorDoc
-            ("Looks like the JSON in " ++ path ++ " is messed up.")
+            ("Your elm.json is not valid JSON.")
             [ reflow "Maybe a comma is missing? Or a closing } or ]?"
             ]
 
-        Just jsonError ->
+        BadStructure jsonError ->
           let
             (location, json, expecting) =
               getJsonErrorInfo jsonError "project"
           in
-            Help.makeErrorDoc ("Something is wrong in your " ++ path ++ " file.") $
+            Help.makeErrorDoc ("Problem in your elm.json file.") $
               if location == "project" then
                 [ text "I was expecting" <+> green (text expecting) <> text "."
                 ]
@@ -64,6 +74,9 @@ toDoc err =
                       , dullyellow (text location)
                       ]
                 ]
+
+        BadContent ->
+          error "TODO bad json bad content"
 
     CorruptDocumentation problem ->
       Help.makeErrorDoc "CorruptDocumentation" [ text "TODO" ]
@@ -83,10 +96,10 @@ toDoc err =
       Help.makeErrorDoc "CorruptBinary" [ text $ "TODO " ++ path ]
 
 
-getJsonErrorInfo :: Json.Error -> String -> (String, Aeson.Value, String)
+getJsonErrorInfo :: Decode.Error -> String -> (String, Aeson.Value, String)
 getJsonErrorInfo err location =
   case err of
-    Json.Field field subErr ->
+    Decode.Field field subErr ->
       getJsonErrorInfo subErr $
         if Text.isInfixOf "-" field then
           location ++ "[\"" ++ Text.unpack field ++ "\"]"
@@ -94,9 +107,9 @@ getJsonErrorInfo err location =
         else
           location ++ "." ++ Text.unpack field
 
-    Json.Index index subErr ->
+    Decode.Index index subErr ->
       getJsonErrorInfo subErr $
         location ++ "[" ++ show index ++ "]"
 
-    Json.Failure value expecting ->
+    Decode.Failure value expecting ->
       (location, value, expecting)

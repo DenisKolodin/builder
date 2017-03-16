@@ -1,5 +1,5 @@
 Name: builder
-Version: 0.19
+Version: 0.19.0
 
 Synopsis:
     Library to download and build Elm projects
@@ -43,9 +43,11 @@ Library
 
     exposed-modules:
         Elm.PerUserCache,
-        Elm.Project,
         Elm.Project.Constraint,
+        Elm.Project.Json,
         Elm.Project.Licenses,
+        Elm.Project.Root,
+        Elm.Project.Summary,
         File.Compile,
         File.Crawl,
         File.IO,
@@ -53,8 +55,7 @@ Library
         Reporting.Error,
         Reporting.Progress,
         Reporting.Progress.Terminal,
-        Reporting.Task,
-        Stuff.Verify
+        Reporting.Task
 
     other-modules:
         Deps.Explorer,
@@ -64,16 +65,16 @@ Library
         Deps.Verify,
         Deps.Website,
         Elm.Project.BuildPlan,
-        Elm.Project.Internal,
         File.Find,
+        Json.Decode,
+        Json.Encode,
         Reporting.Error.Assets,
         Reporting.Error.Compile,
         Reporting.Error.Crawl,
         Reporting.Error.Help,
         Reporting.Progress.Bar,
-        Stuff.Deps,
         Stuff.Paths,
-        Utils.Json
+        Stuff.Verify
 
     Build-depends:
         aeson >= 0.11,
@@ -84,7 +85,7 @@ Library
         bytestring >= 0.9 && < 0.11,
         directory >= 1.0 && < 2.0,
         edit-distance,
-        elm-compiler == 0.18.1,
+        elm-compiler == 0.19.0,
         filepath >= 1 && < 2.0,
         fsnotify >= 0.2.1,
         HTTP >= 4000.2.5 && < 4000.4,

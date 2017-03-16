@@ -35,7 +35,8 @@ import Reporting.Error.Help (reflow, stack)
 
 
 data Error
-  = Assets Asset.Error
+  = NoElmJson
+  | Assets Asset.Error
   | BadDep Name Version
   | Crawl (Map.Map Module.Raw Crawl.Error)
   | Cycle [Module.Raw] -- TODO write docs to help with this scenario

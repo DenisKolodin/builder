@@ -1,6 +1,6 @@
 {-# OPTIONS_GHC -Wall #-}
 {-# LANGUAGE OverloadedStrings #-}
-module Utils.Json
+module Json.Decode
   ( Decoder, Error(..), decode, parse
   , text, bool, int, float
   , list, dict, maybe

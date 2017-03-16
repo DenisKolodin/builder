@@ -1,11 +1,19 @@
 {-# OPTIONS_GHC -Wall #-}
 {-# LANGUAGE OverloadedStrings #-}
-module Elm.Project.Licenses (License, check) where
+module Elm.Project.Licenses
+  ( License
+  , check
+  , bsd3
+  , encode
+  )
+  where
 
 import qualified Data.Map as Map
+import Data.Map (Map, (!))
 import Data.Text (Text)
 
 import Elm.Utils (nearbyNames)
+import qualified Json.Encode as Encode
 
 
 
@@ -18,6 +26,16 @@ data License =
     , _code :: Text
     }
   deriving (Eq, Ord)
+
+
+bsd3 :: License
+bsd3 =
+  osiApprovedSpdxLicenses ! "BSD-3-Clause"
+
+
+encode :: License -> Encode.Value
+encode (License _ code) =
+  Encode.text code
 
 
 
@@ -49,7 +67,7 @@ check rawName =
 -- OSI approved licenses in SPDX format.
 -- <https://spdx.org/licenses/>
 --
-osiApprovedSpdxLicenses :: Map.Map Text License
+osiApprovedSpdxLicenses :: Map Text License
 osiApprovedSpdxLicenses =
   Map.fromList
     [ "AFL-1.1" ==> "Academic Free License v1.1"
