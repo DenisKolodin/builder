@@ -16,11 +16,11 @@ import System.FilePath ((</>), (<.>))
 import qualified Elm.Compiler.Module as Module
 import qualified Elm.Package as Pkg
 
-import Elm.Project (Project)
-import qualified Elm.Project as Project
+import Elm.Project.Json (Project)
+import qualified Elm.Project.Json as Project
+import qualified Elm.Project.Summary as Summary
 import qualified Reporting.Error.Crawl as E
 import qualified Reporting.Task as Task
-import qualified Stuff.Deps as Deps
 
 
 
@@ -37,12 +37,12 @@ data Asset
 -- FIND
 
 
-find :: FilePath -> Project -> Deps.ExposedModules -> Module.Raw -> Task.Task_ E.Error Asset
-find root project exposedModules name =
+find :: Summary.Summary -> Module.Raw -> Task.Task_ E.Error Asset
+find (Summary.Summary root project exposed _) name =
   do
       codePaths <- liftIO $ getCodePaths root project name
 
-      case (codePaths, Map.lookup name exposedModules) of
+      case (codePaths, Map.lookup name exposed) of
         ([Elm path], Nothing) ->
             return (Local path)
 
@@ -88,12 +88,12 @@ toFilePath codePath =
 
 getCodePaths :: FilePath -> Project -> Module.Raw -> IO [CodePath]
 getCodePaths root project name =
-  do  let srcDirs = [root </> Project.getSourceDir project]
-      let allowNative = Project.getNative project
+  do  let srcDirs = map (root </>) (Project.getSourceDirs project)
       elm <- mapM (elmExists name) srcDirs
       Maybe.catMaybes <$>
-        if allowNative && Text.isPrefixOf "Native." name then
+        if Text.isPrefixOf "Elm.Kernel." name && Project.isKernel project then
           (++ elm) <$> mapM (jsExists name) srcDirs
+
         else
           return elm
 
@@ -110,4 +110,3 @@ jsExists name srcDir =
   do  let path = srcDir </> Module.nameToPath name <.> "js"
       exists <- doesFileExist path
       return $ if exists then Just (JS path) else Nothing
-

@@ -17,14 +17,14 @@ import qualified Elm.Compiler as Compiler
 import qualified Elm.Compiler.Module as Module
 import qualified Elm.Package as Pkg
 
-import Elm.Project (Project)
-import qualified Elm.Project as Project
+import qualified Elm.Project.Json as Project
+import Elm.Project.Json (Project)
+import Elm.Project.Summary (Summary(..))
 import qualified File.Find as Find
 import qualified File.IO as IO
 import qualified Reporting.Error as Error
 import qualified Reporting.Error.Crawl as E
 import qualified Reporting.Task as Task
-import qualified Stuff.Deps as Deps
 
 
 
@@ -56,44 +56,28 @@ empty =
 -- CRAWL PROJECT
 
 
-crawl :: FilePath -> Project -> Deps.Summary -> Task.Task Graph
-crawl root project summary =
+crawl :: Summary -> Task.Task Graph
+crawl summary@(Summary _ project _ _) =
   let
-    environment =
-      Env
-        { _root = root
-        , _project = project
-        , _exposed = Deps._exposed summary
-        }
-
     unvisited =
       map (Unvisited Nothing) (Project.getRoots project)
   in
-    do  graph <- dfs environment unvisited
+    do  graph <- dfs summary unvisited
         checkForCycles graph
         return graph
-
-
-
-data Env =
-  Env
-    { _root :: FilePath
-    , _project :: Project
-    , _exposed :: Deps.ExposedModules
-    }
 
 
 
 -- DEPTH FIRST SEARCH
 
 
-dfs :: Env -> [Unvisited] -> Task.Task Graph
-dfs env unvisited =
+dfs :: Summary -> [Unvisited] -> Task.Task Graph
+dfs summary unvisited =
   do  chan <- liftIO $ newChan
 
       graph <-
-        do  mapM_ (Task.workerChan chan . crawlFile env) unvisited
-            dfsHelp env chan (length unvisited) empty
+        do  mapM_ (Task.workerChan chan . crawlFile summary) unvisited
+            dfsHelp summary chan (length unvisited) empty
 
       if Map.null (_problems graph)
         then return graph
@@ -103,8 +87,8 @@ dfs env unvisited =
 type FileResult = Either (Module.Raw, E.Error) Asset
 
 
-dfsHelp :: Env -> Chan FileResult -> Int -> Graph -> Task.Task Graph
-dfsHelp env chan pendingWork graph =
+dfsHelp :: Summary -> Chan FileResult -> Int -> Graph -> Task.Task Graph
+dfsHelp summary chan pendingWork graph =
   if pendingWork == 0 then
     return graph
 
@@ -117,27 +101,27 @@ dfsHelp env chan pendingWork graph =
                 let deps = filter (isNew newGraph) (_deps node)
                 forM_ deps $ \dep ->
                   Task.workerChan chan $
-                    crawlFile env (Unvisited (Just name) dep)
+                    crawlFile summary (Unvisited (Just name) dep)
                 let newPending = pendingWork - 1 + length deps
-                dfsHelp env chan newPending newGraph
+                dfsHelp summary chan newPending newGraph
 
           Right (Native name path) ->
             do  let natives = Map.insert name path (_natives graph)
                 let newGraph = graph { _natives = natives }
                 let newPending = pendingWork - 1
-                dfsHelp env chan newPending newGraph
+                dfsHelp summary chan newPending newGraph
 
           Right (Foreign name pkg vsn) ->
             do  let foreigns = Map.insert name (pkg, vsn) (_foreigns graph)
                 let newGraph = graph { _foreigns = foreigns }
                 let newPending = pendingWork - 1
-                dfsHelp env chan newPending newGraph
+                dfsHelp summary chan newPending newGraph
 
           Left (name, err) ->
             do  let problems = Map.insert name err (_problems graph)
                 let newGraph = graph { _problems = problems }
                 let newPending = pendingWork - 1
-                dfsHelp env chan newPending newGraph
+                dfsHelp summary chan newPending newGraph
 
 
 isNew :: Graph -> Module.Raw -> Bool
@@ -165,13 +149,13 @@ data Asset
   | Foreign Module.Raw Pkg.Name Pkg.Version
 
 
-crawlFile :: Env -> Unvisited -> Task.Task_ (Module.Raw, E.Error) Asset
-crawlFile env@(Env root project exposed) (Unvisited maybeParent name) =
+crawlFile :: Summary -> Unvisited -> Task.Task_ (Module.Raw, E.Error) Asset
+crawlFile summary (Unvisited maybeParent name) =
   Task.mapError ((,) name) $
-    do  asset <- Find.find root project exposed name
+    do  asset <- Find.find summary name
         case asset of
           Find.Local path ->
-            readValidHeader env name path
+            readValidHeader summary name path
 
           Find.Native path ->
             return (Native name path)
@@ -187,9 +171,9 @@ crawlFile env@(Env root project exposed) (Unvisited maybeParent name) =
 type HReader a = Task.Task_ E.Error a
 
 
-readValidHeader :: Env -> Module.Raw -> FilePath -> HReader Asset
-readValidHeader env expectedName path =
-  do  let pkg = Project.getName (_project env)
+readValidHeader :: Summary -> Module.Raw -> FilePath -> HReader Asset
+readValidHeader summary expectedName path =
+  do  let pkg = Project.getName (_project summary)
       source <- liftIO (IO.readUtf8 path)
 
       (tag, name, deps) <-
@@ -202,7 +186,7 @@ readValidHeader env expectedName path =
             Task.throw (E.BadHeader path msg)
 
       checkName path expectedName name
-      checkTag (_project env) path tag
+      checkTag (_project summary) path tag
 
       return (Local name (Info path deps))
 
@@ -224,7 +208,7 @@ checkTag project path tag =
 
     Compiler.Port ->
       case project of
-        Project.App _ ->
+        Project.App _ _ ->
           return ()
 
         Project.Pkg _ ->

@@ -11,12 +11,12 @@ import Data.Map (Map)
 import Elm.Package (Name, Version)
 
 import qualified Deps.Verify as Verify
-import Elm.Project (Project(..), PkgInfo(..))
-import qualified Elm.Project as Project
+import Elm.Project.Json (Project(..), PkgInfo(..))
+import qualified Elm.Project.Json as Project
 import qualified Elm.Project.Constraint as Con
+import qualified Elm.Project.Summary as Summary
 import qualified File.IO as IO
 import qualified Reporting.Task as Task
-import qualified Stuff.Deps as Deps
 import qualified Stuff.Paths as Path
 
 
@@ -24,8 +24,8 @@ import qualified Stuff.Paths as Path
 -- VERIFY
 
 
-verify :: Project -> Task.Task Deps.Summary
-verify project =
+verify :: FilePath -> Project -> Task.Task Summary.Summary
+verify root project =
   do  fresh <-
         IO.andM
           [ IO.exists Path.solution
@@ -34,19 +34,23 @@ verify project =
           ]
 
       if fresh
-        then IO.readBinary Path.summary
-        else rebuildCache project
+        then
+          do  (exposed, ifaces) <- IO.readBinary Path.summary
+              return (Summary.Summary root project exposed ifaces)
+        else
+          rebuildCache root project
 
 
-rebuildCache :: Project -> Task.Task Deps.Summary
-rebuildCache project =
+rebuildCache :: FilePath -> Project -> Task.Task Summary.Summary
+rebuildCache root project =
   do  IO.remove Path.solution
       IO.remove Path.summary
 
-      (solution, summary) <- Verify.verify project
+      (solution, summary) <- Verify.verify root project
 
       IO.writeBinary Path.solution solution
-      IO.writeBinary Path.summary summary
+      let (Summary.Summary _ _ exposed ifaces) = summary
+      IO.writeBinary Path.summary (exposed, ifaces)
       return summary
 
 
@@ -62,7 +66,7 @@ checkSolution project =
 checkSolutionHelp :: Project -> Map Name Version -> Bool
 checkSolutionHelp project solution =
   case project of
-    App info ->
+    App info _ ->
       solution == Project.appSolution info
 
     Pkg info ->

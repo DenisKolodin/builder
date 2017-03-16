@@ -18,11 +18,12 @@ import System.FilePath ((</>))
 import Elm.Package (Name, Version)
 
 import qualified Deps.Website as Website
-import qualified Elm.Project as Project
+import qualified Elm.Project.Json as Project
 import qualified File.IO as IO
 import qualified Reporting.Error as Error
 import qualified Reporting.Error.Assets as E
 import qualified Reporting.Task as Task
+import qualified Json.Decode as Decode
 
 
 
@@ -85,14 +86,10 @@ info name version =
                 liftIO (BS.writeFile elmJson bits)
                 return bits
 
-      case Project.parse json of
-        Right (Project.Pkg pkgInfo) ->
+      case Decode.parse Project.pkgDecoder json of
+        Right pkgInfo ->
           return pkgInfo
 
-        Right (Project.App _) ->
+        Left _ ->
           do  IO.remove elmJson
-              Task.throw $ Error.Assets $ E.BadElmJson elmJson Nothing
-
-        Left err ->
-          do  IO.remove elmJson
-              Task.throw $ Error.Assets $ E.BadElmJson elmJson err
+              Task.throw $ Error.Assets $ E.CorruptElmJson name version

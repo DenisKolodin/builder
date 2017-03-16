@@ -11,8 +11,8 @@ import qualified Elm.Compiler as Compiler
 import qualified Elm.Compiler.Module as Module
 import qualified Elm.Package as Pkg
 
-import Elm.Project (Project)
-import qualified Elm.Project as Project
+import Elm.Project.Json (Project)
+import qualified Elm.Project.Json as Project
 import qualified File.Plan as Plan
 import qualified File.IO as IO
 import qualified Reporting.Error.Compile as E

@@ -17,18 +17,17 @@ import System.FilePath ((</>))
 
 import qualified Elm.Compiler.Module as Module
 import qualified Elm.Docs as Docs
-import qualified Elm.Package as Pkg
 import Elm.Package (Name, Version)
-import Elm.Project (Project(..), AppInfo(..), PkgInfo(..))
-import Elm.Project.Constraint (Constraint)
+import Elm.Project.Json (Project(..), AppInfo(..), PkgInfo(..))
 
 import qualified Deps.Explorer as Explorer
 import qualified Deps.Get as Get
 import qualified Deps.Solver.Internal as Solver
 import qualified Deps.Website as Website
 import qualified Elm.Compiler as Compiler
-import qualified Elm.Project as Project
+import qualified Elm.Project.Json as Project
 import qualified Elm.Project.Constraint as Con
+import qualified Elm.Project.Summary as Summary
 import qualified File.Compile as Compile
 import qualified File.Crawl as Crawl
 import qualified File.IO as IO
@@ -36,7 +35,6 @@ import qualified File.Plan as Plan
 import qualified Reporting.Error as Error
 import qualified Reporting.Progress as Progress
 import qualified Reporting.Task as Task
-import qualified Stuff.Deps as Deps
 import qualified Stuff.Paths as Paths
 
 
@@ -44,11 +42,11 @@ import qualified Stuff.Paths as Paths
 -- VERIFY
 
 
-verify :: Project -> Task.Task (Map Name Version, Deps.Summary)
-verify project =
+verify :: FilePath -> Project -> Task.Task (Map Name Version, Summary.Summary)
+verify root project =
   do  solution <- Project.get verifyApp verifyPkg project
       (RawInfo infos ifaces) <- verifyArtifacts solution
-      let summary = Deps.makeSummary project infos ifaces
+      let summary = Summary.init root project infos ifaces
       return (solution, summary)
 
 
@@ -248,12 +246,12 @@ getIface name version info infos depIfaces =
         then IO.readBinary (root </> "ifaces.dat")
         else
           do  let project = Pkg info
-              let summary = Deps.makeCheapSummary info infos depIfaces
+              let summary = Summary.cheapInit root info infos depIfaces
 
               Paths.removeStuff root
 
-              graph <- Crawl.crawl root project summary
-              (dirty, cachedIfaces) <- Plan.plan root project summary graph
+              graph <- Crawl.crawl summary
+              (dirty, cachedIfaces) <- Plan.plan summary graph
               results <- Compile.compileAll project cachedIfaces dirty
 
               Paths.removeStuff root
