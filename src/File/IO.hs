@@ -2,6 +2,7 @@ module File.IO
   ( writeBinary, readBinary
   , writeUtf8, readUtf8
   , remove, exists
+  , removeDir
   , andM
   )
   where
@@ -12,7 +13,7 @@ import qualified Data.Binary as Binary
 import qualified Data.Text as Text
 import qualified Data.Text.IO as TextIO
 import GHC.IO.Exception ( IOErrorType(InvalidArgument) )
-import System.Directory (createDirectoryIfMissing, doesFileExist, removeFile)
+import qualified System.Directory as Dir
 import System.FilePath (dropFileName)
 import System.IO (utf8, hSetEncoding, withBinaryFile, withFile, Handle, IOMode(ReadMode, WriteMode))
 import System.IO.Error (ioeGetErrorType, annotateIOError, modifyIOError)
@@ -30,14 +31,14 @@ writeBinary :: (Binary.Binary a) => FilePath -> a -> Task.Task ()
 writeBinary path value =
   liftIO $
     do  let dir = dropFileName path
-        createDirectoryIfMissing True dir
+        Dir.createDirectoryIfMissing True dir
         withBinaryFile path WriteMode $ \handle ->
             LBS.hPut handle (Binary.encode value)
 
 
 readBinary :: (Binary.Binary a) => FilePath -> Task.Task a
 readBinary path =
-  do  exists <- liftIO (doesFileExist path)
+  do  exists <- liftIO (Dir.doesFileExist path)
       if not exists
         then throwCorruptBinary path
         else
@@ -105,15 +106,23 @@ encodingError filePath ioError =
 remove :: FilePath -> Task.Task ()
 remove filePath =
   liftIO $
-    do  exists <- doesFileExist filePath
+    do  exists <- Dir.doesFileExist filePath
         if exists
-          then removeFile filePath
+          then Dir.removeFile filePath
           else return ()
 
 
 exists :: FilePath -> Task.Task Bool
 exists filePath =
-  liftIO $ doesFileExist filePath
+  liftIO $ Dir.doesFileExist filePath
+
+
+removeDir :: FilePath -> IO ()
+removeDir path =
+  do  exists <- Dir.doesDirectoryExist path
+      if exists
+        then Dir.removeDirectoryRecursive path
+        else return ()
 
 
 
