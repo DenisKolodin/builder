@@ -18,6 +18,7 @@ data Error
   = NotFound -- TODO suggest other names
   | Duplicates [FilePath] [Pkg.Name]
   | BadHeader FilePath Compiler.Error
+  | NoName FilePath Module.Raw
   | BadName FilePath Module.Raw
   | PortsInPackage FilePath
   | EffectsUnexpected FilePath

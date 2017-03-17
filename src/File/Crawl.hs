@@ -173,33 +173,36 @@ type ATask a = Task.Task_ E.Error a
 
 readModuleHeader :: Summary -> Module.Raw -> FilePath -> ATask Asset
 readModuleHeader summary expectedName path =
-  do  (name, deps) <- readHeader (_project summary) path
-      checkName path expectedName name
+  do  (maybeName, deps) <- readHeader (_project summary) path
+      name <- checkName path expectedName maybeName
       return (Local name (Info path deps))
 
 
-readHeader :: Project -> FilePath -> ATask (Module.Raw, [Module.Raw])
+readHeader :: Project -> FilePath -> ATask (Maybe Module.Raw, [Module.Raw])
 readHeader project path =
   do  let pkg = Project.getName project
       source <- liftIO (IO.readUtf8 path)
 
       -- TODO get regions on data extracted here
       case Compiler.parseDependencies pkg source of
-        Right (tag, name, deps) ->
+        Right (tag, maybeName, deps) ->
           do  checkTag project path tag
-              return (name, deps)
+              return (maybeName, deps)
 
         Left msg ->
           Task.throw (E.BadHeader path msg)
 
 
-checkName :: FilePath -> Module.Raw -> Module.Raw -> ATask ()
-checkName path expectedName actualName =
-  if expectedName == actualName then
-    return ()
+checkName :: FilePath -> Module.Raw -> Maybe Module.Raw -> ATask Module.Raw
+checkName path expectedName maybeName =
+  case maybeName of
+    Nothing ->
+      Task.throw (E.NoName path expectedName)
 
-  else
-    Task.throw (E.BadName path actualName)
+    Just actualName ->
+      if expectedName == actualName
+        then return expectedName
+        else Task.throw (E.BadName path actualName)
 
 
 checkTag :: Project -> FilePath -> Compiler.Tag -> ATask ()
