@@ -1,4 +1,4 @@
-module File.Compile (compileAll) where
+module File.Compile (compile) where
 
 import Control.Concurrent (forkIO)
 import Control.Concurrent.MVar (MVar, newEmptyMVar, newMVar, putMVar, readMVar, takeMVar)
@@ -9,10 +9,11 @@ import Data.Text (Text)
 
 import qualified Elm.Compiler as Compiler
 import qualified Elm.Compiler.Module as Module
-import qualified Elm.Package as Pkg
 
 import Elm.Project.Json (Project)
 import qualified Elm.Project.Json as Project
+import qualified Elm.Project.Summary as Summary
+import qualified File.Crawl as Crawl
 import qualified File.Plan as Plan
 import qualified File.IO as IO
 import qualified Reporting.Error.Compile as E
@@ -22,15 +23,23 @@ import qualified Reporting.Task as Task
 
 
 
--- COMPILE ALL
+-- COMPILE
 
 
-compileAll
+compile :: Summary.Summary -> Task.Task (Dict Compiler.Result)
+compile summary =
+  do  graph <- Crawl.crawl summary
+      (dirty, ifaces) <- Plan.plan summary graph
+      let project = Summary._project summary
+      compileHelp project ifaces dirty
+
+
+compileHelp
   :: Project
   -> Module.Interfaces
   -> Dict Plan.Info
   -> Task.Task (Dict Compiler.Result)
-compileAll project ifaces modules =
+compileHelp project ifaces modules =
   do  Task.report (Progress.CompileStart (Map.size modules))
 
       reporter <- Task.getReporter
@@ -38,7 +47,7 @@ compileAll project ifaces modules =
       answers <- liftIO $
         do  mvar <- newEmptyMVar
             iMVar <- newMVar ifaces
-            answerMVars <- Map.traverseWithKey (compile reporter project mvar iMVar) modules
+            answerMVars <- Map.traverseWithKey (compileModule reporter project mvar iMVar) modules
             putMVar mvar answerMVars
             traverse readMVar answerMVars
 
@@ -98,10 +107,10 @@ sortAnswersHelp acc name answer =
 
 
 
--- COMPILE
+-- COMPILE MODULE
 
 
-compile
+compileModule
   :: Progress.Reporter
   -> Project
   -> MVar (Dict (MVar Answer))
@@ -109,7 +118,7 @@ compile
   -> Module.Raw
   -> Plan.Info
   -> IO (MVar Answer)
-compile reporter project answersMVar ifacesMVar name info =
+compileModule reporter project answersMVar ifacesMVar name info =
   do  mvar <- newEmptyMVar
 
       void $ forkIO $
