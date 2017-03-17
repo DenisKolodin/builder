@@ -8,7 +8,7 @@ module File.Crawl
   where
 
 import Control.Concurrent.Chan (Chan, newChan, readChan)
-import Control.Monad (foldM, forM_)
+import Control.Monad (foldM)
 import Control.Monad.Except (liftIO)
 import qualified Data.Graph as Graph
 import qualified Data.Map as Map
