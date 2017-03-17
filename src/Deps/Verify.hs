@@ -245,14 +245,13 @@ getIface name version info infos depIfaces =
       if cached
         then IO.readBinary (root </> "ifaces.dat")
         else
-          do  let project = Pkg info
-              let summary = Summary.cheapInit root info infos depIfaces
+          do  let summary = Summary.cheapInit root info infos depIfaces
 
               Paths.removeStuff root
 
               graph <- Crawl.crawl summary
               (dirty, cachedIfaces) <- Plan.plan summary graph
-              results <- Compile.compileAll project cachedIfaces dirty
+              results <- Compile.compileAll (Pkg info) cachedIfaces dirty
 
               Paths.removeStuff root
 
