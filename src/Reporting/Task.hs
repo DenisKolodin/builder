@@ -57,18 +57,26 @@ data Env =
     { _cacheDir :: FilePath
     , _worker :: IO () -> IO ()
     , _httpManager :: Http.Manager
-    , _reporter :: Progress.Reporter
+    , _tell :: Progress.Progress -> IO ()
     }
 
 
-run :: Progress.Reporter -> Task a -> IO (Either Error.Error a)
-run reporter task =
+run :: Progress.Reporter -> Task a -> IO (Maybe a)
+run (Progress.Reporter tell end) task =
   Network.withSocketsDo $
     do  root <- PerUserCache.getPackageRoot
         pool <- initPool 4
         httpManager <- Http.newManager Http.tlsManagerSettings
-        let env = Env root pool httpManager reporter
-        runReaderT (runExceptT task) env
+        let env = Env root pool httpManager tell
+        result <- runReaderT (runExceptT task) env
+        case result of
+          Left err ->
+            do  end (Just err)
+                return Nothing
+
+          Right answer ->
+            do  end Nothing
+                return (Just answer)
 
 
 throw :: e -> Task_ e a
@@ -104,13 +112,13 @@ getPackageCacheDirFor name version =
 
 report :: Progress.Progress -> Task_ e ()
 report progress =
-  do  reporter <- asks _reporter
-      liftIO (reporter progress)
+  do  tell <- asks _tell
+      liftIO (tell progress)
 
 
-getReporter :: Task Progress.Reporter
+getReporter :: Task (Progress.Progress -> IO ())
 getReporter =
-  asks _reporter
+  asks _tell
 
 
 
@@ -120,7 +128,7 @@ getReporter =
 getSilentRunner :: Task_ x (Task_ e a -> IO (Either e a))
 getSilentRunner =
   do  env <- ask
-      let silentEnv = env { _reporter = \_ -> return () }
+      let silentEnv = env { _tell = \_ -> return () }
       return $ \task -> runReaderT (runExceptT task) silentEnv
 
 

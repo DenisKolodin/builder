@@ -5,7 +5,8 @@ module Reporting.Progress.Terminal
 
 
 import Control.Concurrent (forkIO)
-import Control.Concurrent.Chan (newChan, readChan, writeChan)
+import Control.Concurrent.Chan (Chan, newChan, readChan)
+import Control.Concurrent.MVar (newEmptyMVar, putMVar)
 import qualified System.Info as System
 import System.IO (hFlush, hPutStr, stdout)
 import Text.PrettyPrint.ANSI.Leijen
@@ -15,7 +16,7 @@ import Text.PrettyPrint.ANSI.Leijen
 import qualified Elm.Package as Pkg
 import Elm.Package (Name, Version)
 
-import Reporting.Progress ( Progress(..), Outcome(..) )
+import Reporting.Progress ( Msg(..), Progress(..), Outcome(..) )
 import qualified Reporting.Progress as Progress
 import qualified Reporting.Progress.Bar as Bar
 
@@ -27,15 +28,9 @@ import qualified Reporting.Progress.Bar as Bar
 create :: IO Progress.Reporter
 create =
   do  chan <- newChan
-
-      let stepper state =
-            do  progress <- readChan chan
-                newState <- step progress state
-                stepper newState
-
-      forkIO (stepper (State 0 0 0))
-
-      return (writeChan chan)
+      mvar <- newEmptyMVar
+      forkIO (loop chan (State 0 0 0) >>= putMVar mvar)
+      return (Progress.makeReporter chan mvar)
 
 
 
@@ -51,39 +46,48 @@ data State =
 
 
 
--- STEPPER
+-- LOOP
 
 
-step :: Progress -> State -> IO State
-step progress state@(State total good bad) =
+loop :: Chan Msg -> State -> IO ()
+loop chan state =
+  do  msg <- readChan chan
+      case msg of
+        End _ ->
+          return ()
+
+        Progress progress ->
+          loopHelp chan progress state
+
+
+loopHelp :: Chan Msg -> Progress -> State -> IO ()
+loopHelp chan progress state@(State total good bad) =
   case progress of
-    Start ->
-      return state
 
 
     -- DOWNLOADS
 
     DownloadStart [] ->
-      return state
+      loop chan state
 
     DownloadStart _ ->
       do  putStrLn "Starting downloads...\n"
-          return state
+          loop chan state
 
     DownloadPkgStart _name _version ->
-      return state
+      loop chan state
 
     DownloadPkgEnd name version outcome ->
       do  writeDoc (makeBullet name version outcome)
-          return state
+          loop chan state
 
     DownloadEnd Bad ->
       do  putStrLn ""
-          return state
+          loop chan state
 
     DownloadEnd Good ->
       do  putStrLn ""
-          return state
+          loop chan state
 
 
     -- BUILD DEPS
@@ -91,37 +95,37 @@ step progress state@(State total good bad) =
     BuildDepsStart size ->
       do  hPutStr stdout "Verifying dependencies..."
           hFlush stdout
-          return (State size 0 0)
+          loop chan (State size 0 0)
 
     BuildDepsProgress ->
       do  let n = good + 1
           let msg = "\rBuilding dependencies (" ++ show n ++ "/" ++ show total ++ ")"
           hPutStr stdout msg
           hFlush stdout
-          return (State total n 0)
+          loop chan (State total n 0)
 
     BuildDepsEnd ->
       do  putStrLn "\rDependencies ready!                "
-          return (State 0 0 0)
+          loop chan (State 0 0 0)
 
 
     -- COMPILE
 
     CompileStart size ->
-      return $ State size 0 0
+      loop chan (State size 0 0)
 
     CompileFileStart _ ->
-      return state
+      loop chan state
 
     CompileFileEnd _ Good ->
       do  hPutStr stdout $ Bar.render (good + 1) bad total
           hFlush stdout
-          return $ State total (good + 1) bad
+          loop chan (State total (good + 1) bad)
 
     CompileFileEnd _ Bad ->
       do  hPutStr stdout $ Bar.render good (bad + 1) total
           hFlush stdout
-          return $ State total good (bad + 1)
+          loop chan (State total good (bad + 1))
 
     CompileEnd ->
       let
@@ -134,16 +138,7 @@ step progress state@(State total good bad) =
       in
         do  hPutStr stdout $ Bar.clear
             putStrLn message
-            return $ State 0 0 0
-
-
-    -- REAL END
-
-    Success ->
-      return state
-
-    Failure _ ->
-      return state
+            loop chan (State 0 0 0)
 
 
 

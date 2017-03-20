@@ -1,30 +1,54 @@
 module Reporting.Progress
-  ( Reporter
+  ( Reporter(..)
+  , makeReporter
+  , Msg(..)
   , Progress(..)
   , Outcome(..)
   )
   where
 
 
+import Control.Concurrent.Chan (Chan, writeChan)
+import Control.Concurrent.MVar (MVar, readMVar)
 import qualified Elm.Compiler.Module as Module
 import Elm.Package (Name, Version)
-
 import Reporting.Error (Error)
 
 
 
--- PROGRESS
+-- REPORTER
 
 
-type Reporter =
-  Progress -> IO ()
+data Reporter =
+  Reporter
+    { _tell :: Progress -> IO ()
+    , _end :: Maybe Error -> IO ()
+    }
+
+
+makeReporter :: Chan Msg -> MVar () -> Reporter
+makeReporter chan mvar =
+  let
+    tell progress =
+      writeChan chan (Progress progress)
+
+    end maybeError =
+      do  writeChan chan (End maybeError)
+          readMVar mvar
+  in
+    Reporter tell end
+
+
+
+-- MESSAGES
+
+
+data Msg = Progress Progress | End (Maybe Error)
 
 
 data Progress
-  = Start
-
   -- download packages
-  | DownloadStart [(Name, Version)]
+  = DownloadStart [(Name, Version)]
   | DownloadPkgStart Name Version
   | DownloadPkgEnd Name Version Outcome
   | DownloadEnd Outcome
@@ -39,10 +63,6 @@ data Progress
   | CompileFileStart Module.Raw
   | CompileFileEnd Module.Raw Outcome
   | CompileEnd
-
-  -- end
-  | Success
-  | Failure Error
 
 
 data Outcome = Good | Bad
