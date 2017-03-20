@@ -37,8 +37,8 @@ data Asset
 -- FIND
 
 
-find :: Summary.Summary -> Module.Raw -> Task.Task_ E.Error Asset
-find (Summary.Summary root project exposed _) name =
+find :: Summary.Summary -> Maybe Module.Raw -> Module.Raw -> Task.Task_ E.Error Asset
+find (Summary.Summary root project exposed _) parent name =
   do
       codePaths <- liftIO $ getCodePaths root project name
 
@@ -53,7 +53,7 @@ find (Summary.Summary root project exposed _) name =
             return (Foreign pkg vsn)
 
         ([], Nothing) ->
-            Task.throw E.NotFound
+            Task.throw (E.NotFound parent)
 
         (_, maybePkgs) ->
           let
@@ -91,7 +91,7 @@ getCodePaths root project name =
   do  let srcDirs = map (root </>) (Project.getSourceDirs project)
       elm <- mapM (elmExists name) srcDirs
       Maybe.catMaybes <$>
-        if Text.isPrefixOf "Elm.Kernel." name && Project.isKernel project then
+        if Text.isPrefixOf "Native." name && Project.isKernel project then
           (++ elm) <$> mapM (jsExists name) srcDirs
 
         else
