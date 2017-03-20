@@ -45,8 +45,7 @@ Library
         Elm.PerUserCache,
         Elm.Project,
         File.IO,
-        Reporting.Error,
-        Reporting.Progress,
+        Reporting.Progress.Repl,
         Reporting.Progress.Terminal,
         Reporting.Task
 
@@ -68,10 +67,12 @@ Library
         File.Find,
         Json.Decode,
         Json.Encode,
+        Reporting.Error,
         Reporting.Error.Assets,
         Reporting.Error.Compile,
         Reporting.Error.Crawl,
         Reporting.Error.Help,
+        Reporting.Progress,
         Reporting.Progress.Bar,
         Stuff.Paths,
         Stuff.Verify
