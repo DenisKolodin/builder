@@ -16,6 +16,7 @@ import Text.PrettyPrint.ANSI.Leijen
 import qualified Elm.Package as Pkg
 import Elm.Package (Name, Version)
 
+import qualified Reporting.Error as Error
 import Reporting.Progress ( Msg(..), Progress(..), Outcome(..) )
 import qualified Reporting.Progress as Progress
 import qualified Reporting.Progress.Bar as Bar
@@ -53,7 +54,10 @@ loop :: Chan Msg -> State -> IO ()
 loop chan state =
   do  msg <- readChan chan
       case msg of
-        End _ ->
+        End (Just err) ->
+          Error.toStderr err
+
+        End Nothing ->
           return ()
 
         Progress progress ->

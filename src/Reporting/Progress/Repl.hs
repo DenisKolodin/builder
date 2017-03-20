@@ -34,5 +34,10 @@ loop chan =
         Progress.Progress _ ->
           loop chan
 
-        Progress.End _ ->
-          return ()
+        Progress.End maybeError ->
+          case maybeError of
+            Just _ ->
+              putStrLn "TODO error"
+
+            Nothing ->
+              return ()
