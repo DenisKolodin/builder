@@ -132,13 +132,14 @@ readBuildPlan =
 -- GET WITH FALLBACK
 
 
-getWithReplFallback :: IO (Maybe FilePath)
+getWithReplFallback :: IO FilePath
 getWithReplFallback =
   do  maybeRoot <- findRoot
 
       case maybeRoot of
         Just root ->
-          Dir.setCurrentDirectory root
+          do  Dir.setCurrentDirectory root
+              return root
 
         Nothing ->
           do  cache <- PerUserCache.getReplRoot
@@ -146,8 +147,7 @@ getWithReplFallback =
               Dir.setCurrentDirectory root
               IO.removeDir "elm-stuff"
               Encode.write "elm.json" (Project.encode (Pkg replInfo))
-
-      return maybeRoot
+              return root
 
 
 replInfo :: PkgInfo

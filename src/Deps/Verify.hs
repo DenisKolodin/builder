@@ -29,7 +29,9 @@ import qualified Elm.Project.Json as Project
 import qualified Elm.Project.Constraint as Con
 import qualified Elm.Project.Summary as Summary
 import qualified File.Compile as Compile
+import qualified File.Crawl as Crawl
 import qualified File.IO as IO
+import qualified File.Plan as Plan
 import qualified Reporting.Error as Error
 import qualified Reporting.Progress as Progress
 import qualified Reporting.Task as Task
@@ -244,9 +246,14 @@ getIface name version info infos depIfaces =
         then IO.readBinary (root </> "ifaces.dat")
         else
           do  Paths.removeStuff root
+
               let summary = Summary.cheapInit root info infos depIfaces
-              results <- Compile.compile summary
+              graph <- Crawl.crawl summary
+              (dirty, cachedIfaces) <- Plan.plan summary graph
+              results <- Compile.compile (Pkg info) cachedIfaces dirty
+
               Paths.removeStuff root
+
               updateCache root name info solution results
 
 
