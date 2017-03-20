@@ -31,12 +31,12 @@ compile
 compile project ifaces modules =
   do  Task.report (Progress.CompileStart (Map.size modules))
 
-      reporter <- Task.getReporter
+      tell <- Task.getReporter
 
       answers <- liftIO $
         do  mvar <- newEmptyMVar
             iMVar <- newMVar ifaces
-            answerMVars <- Map.traverseWithKey (compileModule reporter project mvar iMVar) modules
+            answerMVars <- Map.traverseWithKey (compileModule tell project mvar iMVar) modules
             putMVar mvar answerMVars
             traverse readMVar answerMVars
 
@@ -100,14 +100,14 @@ sortAnswersHelp acc name answer =
 
 
 compileModule
-  :: Progress.Reporter
+  :: (Progress.Progress -> IO ())
   -> Project
   -> MVar (Dict (MVar Answer))
   -> MVar Module.Interfaces
   -> Module.Raw
   -> Plan.Info
   -> IO (MVar Answer)
-compileModule reporter project answersMVar ifacesMVar name info =
+compileModule tell project answersMVar ifacesMVar name info =
   do  mvar <- newEmptyMVar
 
       void $ forkIO $
@@ -116,7 +116,7 @@ compileModule reporter project answersMVar ifacesMVar name info =
             if blocked
               then putMVar mvar Blocked
               else
-                do  reporter (Progress.CompileFileStart name)
+                do  tell (Progress.CompileFileStart name)
                     let pkg = Project.getName project
                     let isExposed = elem name (Project.getRoots project)
                     let imports = makeImports project info
@@ -125,11 +125,11 @@ compileModule reporter project answersMVar ifacesMVar name info =
                     let source = Plan._src info
                     case Compiler.compile context source of
                       (localizer, warnings, Left errors) ->
-                        do  reporter (Progress.CompileFileEnd name Progress.Bad)
+                        do  tell (Progress.CompileFileEnd name Progress.Bad)
                             putMVar mvar (Bad (Plan._path info) source localizer errors)
 
                       (localizer, warnings, Right result@(Compiler.Result _ iface _)) ->
-                        do  reporter (Progress.CompileFileEnd name Progress.Good)
+                        do  tell (Progress.CompileFileEnd name Progress.Good)
                             let canonicalName = Module.Canonical pkg name
                             lock <- takeMVar ifacesMVar
                             putMVar ifacesMVar (Map.insert canonicalName iface lock)
