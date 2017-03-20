@@ -13,6 +13,7 @@ import Control.Monad (foldM, void, when)
 import Control.Monad.Except (liftIO)
 import qualified Data.Binary as Binary
 import qualified Data.Map as Map
+import qualified Data.Text as Text
 import System.Directory (doesFileExist, getModificationTime, removeFile)
 import System.FilePath ((</>))
 
@@ -70,6 +71,7 @@ type Status = Maybe Info
 data Info =
   Info
     { _path :: FilePath
+    , _src :: Text.Text
     , _clean :: [Module.Raw]
     , _dirty :: [Module.Raw]
     , _foreign :: [Module.Canonical]
@@ -87,12 +89,12 @@ getStatus
   -> Module.Raw
   -> Crawl.Info
   -> IO (MVar Status)
-getStatus env statusMVars foreigns name (Crawl.Info path deps) =
+getStatus env statusMVars foreigns name (Crawl.Info path src deps) =
   do  mvar <- newEmptyMVar
 
       void $ forkIO $ putMVar mvar =<<
         do  statuses <- readMVar statusMVars
-            info <- foldM (addDep statuses foreigns) (Info path [] [] []) deps
+            info <- foldM (addDep statuses foreigns) (Info path src [] [] []) deps
 
             let elmi = _root env </> Stuff.Paths.elmi name
 

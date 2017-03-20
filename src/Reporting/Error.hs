@@ -38,7 +38,8 @@ data Error
   = NoElmJson
   | Assets Asset.Error
   | BadDep Name Version
-  | Crawl (Map.Map Module.Raw Crawl.Error)
+  | BadCrawlRoot Crawl.Error
+  | BadCrawl (Map.Map Module.Raw Crawl.Error)
   | Cycle [Module.Raw] -- TODO write docs to help with this scenario
   | Compile (Map.Map Module.Raw Compile.Error) -- TODO sort compile errors by edit time
 
@@ -108,7 +109,10 @@ toDoc err =
     BadDep name version ->
       error ("TODO " ++ Pkg.toString name ++ " " ++ Pkg.versionToString version)
 
-    Crawl errors ->
+    BadCrawlRoot err ->
+      error ("TODO crawl root")
+
+    BadCrawl errors ->
       error ("TODO crawl " ++ show (Map.keys errors))
 
     Cycle names ->

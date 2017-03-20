@@ -12,10 +12,7 @@ import qualified Elm.Compiler.Module as Module
 
 import Elm.Project.Json (Project)
 import qualified Elm.Project.Json as Project
-import qualified Elm.Project.Summary as Summary
-import qualified File.Crawl as Crawl
 import qualified File.Plan as Plan
-import qualified File.IO as IO
 import qualified Reporting.Error.Compile as E
 import qualified Reporting.Error as Error
 import qualified Reporting.Progress as Progress
@@ -26,20 +23,12 @@ import qualified Reporting.Task as Task
 -- COMPILE
 
 
-compile :: Summary.Summary -> Task.Task (Dict Compiler.Result)
-compile summary =
-  do  graph <- Crawl.crawl summary
-      (dirty, ifaces) <- Plan.plan summary graph
-      let project = Summary._project summary
-      compileHelp project ifaces dirty
-
-
-compileHelp
+compile
   :: Project
   -> Module.Interfaces
   -> Dict Plan.Info
   -> Task.Task (Dict Compiler.Result)
-compileHelp project ifaces modules =
+compile project ifaces modules =
   do  Task.report (Progress.CompileStart (Map.size modules))
 
       reporter <- Task.getReporter
@@ -129,16 +118,15 @@ compileModule reporter project answersMVar ifacesMVar name info =
               else
                 do  reporter (Progress.CompileFileStart name)
                     let pkg = Project.getName project
-                    let path = Plan._path info
                     let isExposed = elem name (Project.getRoots project)
                     let imports = makeImports project info
                     ifaces <- readMVar ifacesMVar
                     let context = Compiler.Context pkg isExposed imports ifaces
-                    source <- IO.readUtf8 path -- TODO store in Plan.Info instead?
+                    let source = Plan._src info
                     case Compiler.compile context source of
                       (localizer, warnings, Left errors) ->
                         do  reporter (Progress.CompileFileEnd name Progress.Bad)
-                            putMVar mvar (Bad path source localizer errors)
+                            putMVar mvar (Bad (Plan._path info) source localizer errors)
 
                       (localizer, warnings, Right result@(Compiler.Result _ iface _)) ->
                         do  reporter (Progress.CompileFileEnd name Progress.Good)
@@ -155,7 +143,7 @@ compileModule reporter project answersMVar ifacesMVar name info =
 
 
 makeImports :: Project -> Plan.Info -> Dict Module.Canonical
-makeImports project (Plan.Info _ clean dirty foreign) =
+makeImports project (Plan.Info _ _ clean dirty foreign) =
   let
     pkgName =
       Project.getName project

@@ -4,6 +4,7 @@ module File.Crawl
   ( Graph(..)
   , Info(..)
   , crawl
+  , crawlFromSource
   )
   where
 
@@ -13,6 +14,7 @@ import Control.Monad.Except (liftIO)
 import qualified Data.Graph as Graph
 import qualified Data.Map as Map
 import qualified Data.Set as Set
+import Data.Text (Text)
 
 import qualified Elm.Compiler as Compiler
 import qualified Elm.Compiler.Module as Module
@@ -44,7 +46,8 @@ data Graph =
 data Info =
   Info
     { _path :: FilePath
-    , _deps :: [Module.Raw]
+    , _source :: Text
+    , _imports :: [Module.Raw]
     }
 
 
@@ -59,13 +62,21 @@ empty =
 
 crawl :: Summary -> Task.Task Graph
 crawl summary@(Summary _ project _ _) =
-  let
-    unvisited =
-      map (Unvisited Nothing) (Project.getRoots project)
-  in
-    do  graph <- dfs summary unvisited
-        checkForCycles graph
-        return graph
+  do  let unvisited = map (Unvisited Nothing) (Project.getRoots project)
+      graph <- dfs summary unvisited
+      checkForCycles graph
+      return graph
+
+
+crawlFromSource :: Summary -> FilePath -> Text -> Task.Task (Module.Raw, Graph)
+crawlFromSource summary@(Summary _ project _ _) path source =
+  do  (maybeName, deps) <-
+        Task.mapError Error.BadCrawlRoot (parseHeader project path source)
+      let name = maybe "Main" id maybeName
+      subGraph <- dfs summary (map (Unvisited maybeName) deps)
+      let graph = addLocal name (Info path source deps) subGraph
+      checkForCycles graph
+      return (name, graph)
 
 
 
@@ -80,7 +91,7 @@ dfs summary unvisited =
 
       if Map.null (_problems graph)
         then return graph
-        else Task.throw (Error.Crawl (_problems graph))
+        else Task.throw (Error.BadCrawl (_problems graph))
 
 
 type FileResult = Either (Module.Raw, E.Error) Asset
@@ -97,9 +108,8 @@ dfsHelp summary chan oldPending oldSeen unvisited graph =
           do  asset <- liftIO $ readChan chan
               case asset of
                 Right (Local name info) ->
-                  do  let locals = Map.insert name info (_locals graph)
-                      let newGraph = graph { _locals = locals }
-                      let deps = map (Unvisited (Just name)) (_deps info)
+                  do  let newGraph = addLocal name info graph
+                      let deps = map (Unvisited (Just name)) (_imports info)
                       dfsHelp summary chan (pending - 1) seen deps newGraph
 
                 Right (Native name path) ->
@@ -116,6 +126,11 @@ dfsHelp summary chan oldPending oldSeen unvisited graph =
                   do  let problems = Map.insert name err (_problems graph)
                       let newGraph = graph { _problems = problems }
                       dfsHelp summary chan (pending - 1) seen [] newGraph
+
+
+addLocal :: Module.Raw -> Info -> Graph -> Graph
+addLocal name info graph =
+  graph { _locals = Map.insert name info (_locals graph) }
 
 
 crawlNew
@@ -152,7 +167,7 @@ data Asset
 crawlFile :: Summary -> Unvisited -> Task.Task_ (Module.Raw, E.Error) Asset
 crawlFile summary (Unvisited maybeParent name) =
   Task.mapError ((,) name) $
-    do  asset <- Find.find summary name
+    do  asset <- Find.find summary maybeParent name
         case asset of
           Find.Local path ->
             readModuleHeader summary name path
@@ -173,24 +188,22 @@ type ATask a = Task.Task_ E.Error a
 
 readModuleHeader :: Summary -> Module.Raw -> FilePath -> ATask Asset
 readModuleHeader summary expectedName path =
-  do  (maybeName, deps) <- readHeader (_project summary) path
+  do  source <- liftIO (IO.readUtf8 path)
+      (maybeName, deps) <- parseHeader (_project summary) path source
       name <- checkName path expectedName maybeName
-      return (Local name (Info path deps))
+      return (Local name (Info path source deps))
 
 
-readHeader :: Project -> FilePath -> ATask (Maybe Module.Raw, [Module.Raw])
-readHeader project path =
-  do  let pkg = Project.getName project
-      source <- liftIO (IO.readUtf8 path)
+-- TODO get regions on data extracted here
+parseHeader :: Project -> FilePath -> Text -> ATask (Maybe Module.Raw, [Module.Raw])
+parseHeader project path source =
+  case Compiler.parseDependencies (Project.getName project) source of
+    Right (tag, maybeName, deps) ->
+      do  checkTag project path tag
+          return (maybeName, deps)
 
-      -- TODO get regions on data extracted here
-      case Compiler.parseDependencies pkg source of
-        Right (tag, maybeName, deps) ->
-          do  checkTag project path tag
-              return (maybeName, deps)
-
-        Left msg ->
-          Task.throw (E.BadHeader path msg)
+    Left msg ->
+      Task.throw (E.BadHeader path msg)
 
 
 checkName :: FilePath -> Module.Raw -> Maybe Module.Raw -> ATask Module.Raw
@@ -235,7 +248,7 @@ checkForCycles :: Graph -> Task.Task ()
 checkForCycles (Graph locals _ _ _) =
   let
     toNode (name, info) =
-      (name, name, _deps info)
+      (name, name, _imports info)
 
     components =
       Graph.stronglyConnComp (map toNode (Map.toList locals))
