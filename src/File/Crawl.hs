@@ -34,12 +34,12 @@ import qualified Reporting.Task as Task
 -- GRAPH
 
 
-data Graph =
+data Graph problems =
   Graph
     { _locals :: Map.Map Module.Raw Info
     , _natives :: Map.Map Module.Raw FilePath
     , _foreigns :: Map.Map Module.Raw (Pkg.Name, Pkg.Version)
-    , _problems :: Map.Map Module.Raw E.Error
+    , _problems :: problems
     }
 
 
@@ -51,16 +51,11 @@ data Info =
     }
 
 
-empty :: Graph
-empty =
-  Graph Map.empty Map.empty Map.empty Map.empty
-
-
 
 -- CRAWL PROJECT
 
 
-crawl :: Summary -> Task.Task Graph
+crawl :: Summary -> Task.Task (Graph ())
 crawl summary@(Summary _ project _ _) =
   do  let unvisited = map (Unvisited Nothing) (Project.getRoots project)
       graph <- dfs summary unvisited
@@ -68,7 +63,7 @@ crawl summary@(Summary _ project _ _) =
       return graph
 
 
-crawlFromSource :: Summary -> FilePath -> Text -> Task.Task (Module.Raw, Graph)
+crawlFromSource :: Summary -> FilePath -> Text -> Task.Task (Module.Raw, Graph ())
 crawlFromSource summary@(Summary _ project _ _) path source =
   do  (maybeName, deps) <-
         Task.mapError Error.BadCrawlRoot (parseHeader project path source)
@@ -83,21 +78,29 @@ crawlFromSource summary@(Summary _ project _ _) path source =
 -- DEPTH FIRST SEARCH
 
 
-dfs :: Summary -> [Unvisited] -> Task.Task Graph
+dfs :: Summary -> [Unvisited] -> Task.Task (Graph ())
 dfs summary unvisited =
   do  chan <- liftIO newChan
 
-      graph <- dfsHelp summary chan 0 Set.empty unvisited empty
+      graph <- dfsHelp summary chan 0 Set.empty unvisited emptyGraph
 
       if Map.null (_problems graph)
-        then return graph
+        then return (graph { _problems = () })
         else Task.throw (Error.BadCrawl (_problems graph))
+
+
+type WorkGraph = Graph (Map.Map Module.Raw E.Error)
+
+
+emptyGraph :: WorkGraph
+emptyGraph =
+  Graph Map.empty Map.empty Map.empty Map.empty
 
 
 type FileResult = Either (Module.Raw, E.Error) Asset
 
 
-dfsHelp :: Summary -> Chan FileResult -> Int -> Set.Set Module.Raw -> [Unvisited] -> Graph -> Task.Task Graph
+dfsHelp :: Summary -> Chan FileResult -> Int -> Set.Set Module.Raw -> [Unvisited] -> WorkGraph -> Task.Task WorkGraph
 dfsHelp summary chan oldPending oldSeen unvisited graph =
   do  (seen, pending) <-
         foldM (crawlNew summary chan) (oldSeen, oldPending) unvisited
@@ -128,7 +131,7 @@ dfsHelp summary chan oldPending oldSeen unvisited graph =
                       dfsHelp summary chan (pending - 1) seen [] newGraph
 
 
-addLocal :: Module.Raw -> Info -> Graph -> Graph
+addLocal :: Module.Raw -> Info -> Graph a -> Graph a
 addLocal name info graph =
   graph { _locals = Map.insert name info (_locals graph) }
 
@@ -244,7 +247,7 @@ checkTag project path tag =
 -- DETECT CYCLES
 
 
-checkForCycles :: Graph -> Task.Task ()
+checkForCycles :: Graph a -> Task.Task ()
 checkForCycles (Graph locals _ _ _) =
   let
     toNode (name, info) =

@@ -34,7 +34,7 @@ import qualified Stuff.Paths
 type Dict value = Map.Map Module.Raw value
 
 
-plan :: Summary.Summary -> Crawl.Graph -> Task.Task (Dict Info, Module.Interfaces)
+plan :: Summary.Summary -> Crawl.Graph () -> Task.Task (Dict Info, Module.Interfaces)
 plan (Summary.Summary root project _ ifaces) (Crawl.Graph locals _ foreigns _) =
   liftIO $
   do  queue <- newChan
