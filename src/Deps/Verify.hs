@@ -28,6 +28,7 @@ import qualified Elm.Compiler as Compiler
 import qualified Elm.Project.Json as Project
 import qualified Elm.Project.Constraint as Con
 import qualified Elm.Project.Summary as Summary
+import qualified File.Artifacts as Artifacts
 import qualified File.Compile as Compile
 import qualified File.Crawl as Crawl
 import qualified File.IO as IO
@@ -250,7 +251,8 @@ getIface name version info infos depIfaces =
               let summary = Summary.cheapInit root info infos depIfaces
               graph <- Crawl.crawl summary
               (dirty, cachedIfaces) <- Plan.plan summary graph
-              results <- Compile.compile (Pkg info) cachedIfaces dirty
+              answers <- Compile.compile (Pkg info) cachedIfaces dirty
+              results <- Artifacts.ignore answers
 
               Paths.removeStuff root
 

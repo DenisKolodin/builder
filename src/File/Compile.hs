@@ -1,4 +1,8 @@
-module File.Compile (compile) where
+module File.Compile
+  ( compile
+  , Answer(..)
+  )
+  where
 
 import Control.Concurrent (forkIO)
 import Control.Concurrent.MVar (MVar, newEmptyMVar, newMVar, putMVar, readMVar, takeMVar)
@@ -13,8 +17,6 @@ import qualified Elm.Compiler.Module as Module
 import Elm.Project.Json (Project)
 import qualified Elm.Project.Json as Project
 import qualified File.Plan as Plan
-import qualified Reporting.Error.Compile as E
-import qualified Reporting.Error as Error
 import qualified Reporting.Progress as Progress
 import qualified Reporting.Task as Task
 
@@ -23,11 +25,7 @@ import qualified Reporting.Task as Task
 -- COMPILE
 
 
-compile
-  :: Project
-  -> Module.Interfaces
-  -> Dict Plan.Info
-  -> Task.Task (Dict Compiler.Result)
+compile :: Project -> Module.Interfaces -> Dict Plan.Info -> Task.Task (Dict Answer)
 compile project ifaces modules =
   do  Task.report (Progress.CompileStart (Map.size modules))
 
@@ -42,12 +40,7 @@ compile project ifaces modules =
 
       Task.report Progress.CompileEnd
 
-      case sortAnswers answers of
-        Left errors ->
-          Task.throw (Error.Compile errors)
-
-        Right results ->
-          return results
+      return answers
 
 
 
@@ -61,38 +54,6 @@ data Answer
 
 
 type Dict a = Map.Map Module.Raw a
-
-
-sortAnswers :: Dict Answer -> Either (Dict E.Error) (Dict Compiler.Result)
-sortAnswers answers =
-  Map.foldlWithKey sortAnswersHelp (Right Map.empty) answers
-
-
-sortAnswersHelp
-  :: Either (Dict E.Error) (Dict Compiler.Result)
-  -> Module.Raw
-  -> Answer
-  -> Either (Dict E.Error) (Dict Compiler.Result)
-sortAnswersHelp acc name answer =
-  case answer of
-    Blocked ->
-      acc
-
-    Bad path src localizer errors ->
-      case acc of
-        Left dict ->
-          Left (Map.insert name (E.Error path src localizer errors) dict)
-
-        Right _ ->
-          Left (Map.singleton name (E.Error path src localizer errors))
-
-    Good result ->
-      case acc of
-        Left _ ->
-          acc
-
-        Right results ->
-          Right (Map.insert name result results)
 
 
 

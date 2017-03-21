@@ -16,6 +16,7 @@ import qualified Elm.Compiler.Module as Module
 import qualified Elm.Project.Root as Root
 import qualified Elm.Project.Summary as Summary
 import Elm.Project.Summary (Summary)
+import qualified File.Artifacts as Artifacts
 import qualified File.Compile as Compile
 import qualified File.Crawl as Crawl
 import qualified File.Plan as Plan
@@ -45,13 +46,19 @@ compile summary =
   do  graph <- Crawl.crawl summary
       (dirty, ifaces) <- Plan.plan summary graph
       let project = Summary._project summary
-      Compile.compile project ifaces dirty
+      answers <- Compile.compile project ifaces dirty
+      results <- Artifacts.write answers
+      -- TODO generate JS code
+      return results
 
 
-compileSource :: Summary -> Text -> Task.Task ()
-compileSource summary source =
-  do  graph <- Crawl.crawl summary
+compileSource :: Summary -> FilePath -> Text -> Task.Task (Map Module.Raw Compiler.Result)
+compileSource summary path source =
+  do  (name, graph) <- Crawl.crawlFromSource summary path source
       (dirty, ifaces) <- Plan.plan summary graph
       let project = Summary._project summary
-      Compile.compile project ifaces dirty
-      return ()
+      answers <- Compile.compile project ifaces dirty
+      results <- Artifacts.write answers
+      -- TODO generate JS in one (big?) bundle
+      -- TODO perhaps it can be cut up for elm-lang.org?
+      return results
