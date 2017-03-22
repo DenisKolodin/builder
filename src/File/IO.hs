@@ -8,14 +8,13 @@ module File.IO
   where
 
 import Control.Monad.Except (liftIO)
-import qualified Data.ByteString.Lazy as LBS
 import qualified Data.Binary as Binary
 import qualified Data.Text as Text
 import qualified Data.Text.IO as TextIO
 import GHC.IO.Exception ( IOErrorType(InvalidArgument) )
 import qualified System.Directory as Dir
 import System.FilePath (dropFileName)
-import System.IO (utf8, hSetEncoding, withBinaryFile, withFile, Handle, IOMode(ReadMode, WriteMode))
+import System.IO (utf8, hSetEncoding, withFile, Handle, IOMode(ReadMode, WriteMode))
 import System.IO.Error (ioeGetErrorType, annotateIOError, modifyIOError)
 
 import qualified Reporting.Error as Error
@@ -32,8 +31,7 @@ writeBinary path value =
   liftIO $
     do  let dir = dropFileName path
         Dir.createDirectoryIfMissing True dir
-        withBinaryFile path WriteMode $ \handle ->
-            LBS.hPut handle (Binary.encode value)
+        Binary.encodeFile path value
 
 
 readBinary :: (Binary.Binary a) => FilePath -> Task.Task a
