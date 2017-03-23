@@ -67,6 +67,7 @@ Library
         File.Crawl,
         File.Find,
         File.Generate,
+        File.Hash,
         File.Plan,
         Json.Decode,
         Json.Encode,

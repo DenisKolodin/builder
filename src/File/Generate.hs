@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -Wall #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
 module File.Generate
@@ -9,12 +10,8 @@ module File.Generate
 
 import Control.Monad (foldM)
 import Control.Monad.Trans (liftIO)
-import qualified Data.Binary.Get as Binary
-import qualified Data.ByteString as BS
 import qualified Data.ByteString.Builder as BS
-import qualified Data.ByteString.Builder.Extra as BS (defaultChunkSize)
 import qualified Data.ByteString.Lazy as LBS
-import qualified Data.Digest.Pure.SHA as SHA
 import qualified Data.List as List
 import qualified Data.Map as Map
 import qualified Data.Set as Set
@@ -30,6 +27,7 @@ import qualified Elm.Project.BuildPlan as BP
 import qualified Elm.Project.Json as Project
 import qualified Elm.Project.Summary as Summary
 import qualified File.Crawl as Crawl
+import qualified File.Hash as Hash
 import qualified Reporting.Task as Task
 import qualified Stuff.Paths as Paths
 
@@ -138,33 +136,6 @@ sortLocal graph results name (Crawl.Info path _ imports) state =
 
 
 
--- HASHING
-
-
-data HashState =
-  HashState
-    { _length :: !Int
-    , _decoder :: !(Binary.Decoder SHA.SHA1State)
-    }
-
-
-emptyHashState :: HashState
-emptyHashState =
-  HashState 0 SHA.sha1Incremental
-
-
-toHash :: HashState -> String
-toHash (HashState len decoder) =
-  SHA.showDigest $ SHA.completeSha1Incremental decoder len
-
-
-put :: IO.Handle -> HashState -> BS.ByteString -> IO HashState
-put handle (HashState len decoder) chunk =
-  do  BS.hPut handle chunk
-      return $ HashState (len + BS.length chunk) (Binary.pushChunk decoder chunk)
-
-
-
 -- WRITE OBJECT FILES
 
 
@@ -172,38 +143,20 @@ writeObjFiles :: [ObjFile] -> IO ()
 writeObjFiles objs =
   do  hash <-
         IO.withBinaryFile "temp.js" IO.WriteMode $ \handle ->
-          toHash <$> foldM (writeObjFile handle) emptyHashState objs
+          Hash.toString <$> foldM (writeObjFile handle) Hash.starter objs
 
       Dir.renameFile "temp.js" (hash ++ ".js")
 
 
-writeObjFile :: IO.Handle -> HashState -> ObjFile -> IO HashState
+writeObjFile :: IO.Handle -> Hash.State -> ObjFile -> IO Hash.State
 writeObjFile handle state elmo =
   case elmo of
     Source builder ->
-      foldM (put handle) state $
+      foldM (Hash.put handle) state $
         LBS.toChunks (BS.toLazyByteString builder)
 
     File path ->
-      appendTo handle path state
-
-
-
--- APPEND FILES
-
-
-appendTo :: IO.Handle -> FilePath -> HashState -> IO HashState
-appendTo sink path state =
-  IO.withBinaryFile path IO.ReadMode $ \src ->
-    appendToHelp sink src state
-
-
-appendToHelp :: IO.Handle -> IO.Handle -> HashState -> IO HashState
-appendToHelp sink src state =
-  do  chunk <- BS.hGet src BS.defaultChunkSize
-      if BS.null chunk
-        then return state
-        else appendToHelp sink src =<< put sink state chunk
+      Hash.append handle path state
 
 
 
