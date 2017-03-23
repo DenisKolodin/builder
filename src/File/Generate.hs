@@ -50,7 +50,7 @@ generate :: Crawl.Graph () -> Results -> Config -> Task.Task ()
 generate graph results config =
   case config of
     Only roots ->
-      do  let (elmos, pkgs) = sortElmos graph results roots
+      do  let (objs, pkgs) = toObjFiles graph results roots
           error "TODO"
 
     Everything (Summary.Summary _ project _ _) ->
@@ -62,36 +62,42 @@ generate graph results config =
           return ()
 
         Project.App _ (Just (BP.BuildPlan cache pages bundles endpoint outputDir)) ->
-          do  let (elmos, _) = sortElmos graph results (map BP._elm pages)
-              liftIO (write elmos)
+          do  let (objs, _) = toObjFiles graph results (map BP._elm pages)
+              liftIO (writeObjFiles objs)
+
+
+
+-- OBJECT FILES
+
+
+data ObjFile
+  = Source BS.Builder
+  | File FilePath
+
+
+toObjFiles :: Crawl.Graph () -> Results -> [Module.Raw] -> ([ObjFile], Set.Set (Pkg.Name, Pkg.Version))
+toObjFiles graph results roots =
+  let
+    (SortState objs pkgs _) =
+      List.foldl' (sort graph results) (SortState [] Set.empty Set.empty) roots
+  in
+    (reverse objs, pkgs)
 
 
 
 -- TOPOLOGICAL SORT
 
 
-data Elmo = Source BS.Builder | File FilePath
-
-
-sortElmos :: Crawl.Graph () -> Results -> [Module.Raw] -> ([Elmo], Set.Set (Pkg.Name, Pkg.Version))
-sortElmos graph results roots =
-  let
-    (State pkgs elmos _) =
-      List.foldl' (sort graph results) (State Set.empty [] Set.empty) roots
-  in
-    (elmos, pkgs)
-
-
-data State =
-  State
-    { _pkgs :: !(Set.Set (Pkg.Name, Pkg.Version))
-    , _elmos :: ![Elmo]
+data SortState =
+  SortState
+    { _objs :: ![ObjFile]
+    , _pkgs :: !(Set.Set (Pkg.Name, Pkg.Version))
     , _visited :: !(Set.Set Module.Raw)
     }
 
 
-sort :: Crawl.Graph () -> Results -> State -> Module.Raw -> State
-sort graph@(Crawl.Graph locals natives foreigns _) results state@(State pkgs elmos visited) name =
+sort :: Crawl.Graph () -> Results -> SortState -> Module.Raw -> SortState
+sort graph@(Crawl.Graph locals natives foreigns _) results state@(SortState objs pkgs visited) name =
   if Set.member name visited then
     state
 
@@ -103,24 +109,24 @@ sort graph@(Crawl.Graph locals natives foreigns _) results state@(State pkgs elm
       Nothing ->
         case Map.lookup name foreigns of
           Just pkg ->
-            State (Set.insert pkg pkgs) elmos (Set.insert name visited)
+            SortState objs (Set.insert pkg pkgs) (Set.insert name visited)
 
           Nothing ->
             case Map.lookup name natives of
               Just path ->
-                State pkgs (File path : elmos) (Set.insert name visited)
+                SortState (File path : objs) pkgs (Set.insert name visited)
 
               Nothing ->
                 error "compiler bug is manifesting in File.Generate"
 
 
-sortLocal :: Crawl.Graph () -> Results -> Module.Raw -> Crawl.Info -> State -> State
+sortLocal :: Crawl.Graph () -> Results -> Module.Raw -> Crawl.Info -> SortState -> SortState
 sortLocal graph results name (Crawl.Info path _ imports) state =
   let
-    (State pkgs elmos visited) =
+    (SortState objs pkgs visited) =
       List.foldl' (sort graph results) state imports
 
-    elmo =
+    obj =
       case Map.lookup name results of
         Nothing ->
           File (Paths.elmo name)
@@ -128,58 +134,76 @@ sortLocal graph results name (Crawl.Info path _ imports) state =
         Just (Compiler.Result _ _ js) ->
           Source js
   in
-    State pkgs (elmo : elmos) (Set.insert name visited)
+    SortState (obj : objs) pkgs (Set.insert name visited)
 
 
 
--- WRITE JS FILE
+-- HASHING
 
 
-write :: [Elmo] -> IO ()
-write elmos =
-  do  hash <-
-        IO.withBinaryFile "temp.js" IO.WriteMode $ \handle ->
-          toHash <$> foldM (writeElmo handle) (ShaState 0 SHA.sha1Incremental) elmos
-
-      Dir.renameFile "temp.js" (hash ++ ".js")
-
-
-data ShaState =
-  ShaState
+data HashState =
+  HashState
     { _length :: !Int
     , _decoder :: !(Binary.Decoder SHA.SHA1State)
     }
 
 
-toHash :: ShaState -> String
-toHash (ShaState len decoder) =
+emptyHashState :: HashState
+emptyHashState =
+  HashState 0 SHA.sha1Incremental
+
+
+toHash :: HashState -> String
+toHash (HashState len decoder) =
   SHA.showDigest $ SHA.completeSha1Incremental decoder len
 
 
-writeElmo :: IO.Handle -> ShaState -> Elmo -> IO ShaState
-writeElmo handle state elmo =
+put :: IO.Handle -> HashState -> BS.ByteString -> IO HashState
+put handle (HashState len decoder) chunk =
+  do  BS.hPut handle chunk
+      return $ HashState (len + BS.length chunk) (Binary.pushChunk decoder chunk)
+
+
+
+-- WRITE OBJECT FILES
+
+
+writeObjFiles :: [ObjFile] -> IO ()
+writeObjFiles objs =
+  do  hash <-
+        IO.withBinaryFile "temp.js" IO.WriteMode $ \handle ->
+          toHash <$> foldM (writeObjFile handle) emptyHashState objs
+
+      Dir.renameFile "temp.js" (hash ++ ".js")
+
+
+writeObjFile :: IO.Handle -> HashState -> ObjFile -> IO HashState
+writeObjFile handle state elmo =
   case elmo of
     Source builder ->
       foldM (put handle) state $
         LBS.toChunks (BS.toLazyByteString builder)
 
     File path ->
-      IO.withBinaryFile path IO.ReadMode $ \handle2 ->
-        copyFile handle handle2 state
+      appendTo handle path state
 
 
-put :: IO.Handle -> ShaState -> BS.ByteString -> IO ShaState
-put handle (ShaState len decoder) chunk =
-  do  BS.hPut handle chunk
-      return $ ShaState (len + BS.length chunk) (Binary.pushChunk decoder chunk)
+
+-- APPEND FILES
 
 
-copyFile :: IO.Handle -> IO.Handle -> ShaState -> IO ShaState
-copyFile output input state =
-  do  chunk <- BS.hGet input BS.defaultChunkSize
+appendTo :: IO.Handle -> FilePath -> HashState -> IO HashState
+appendTo sink path state =
+  IO.withBinaryFile path IO.ReadMode $ \src ->
+    appendToHelp sink src state
+
+
+appendToHelp :: IO.Handle -> IO.Handle -> HashState -> IO HashState
+appendToHelp sink src state =
+  do  chunk <- BS.hGet src BS.defaultChunkSize
       if BS.null chunk
         then return state
-        else copyFile output input =<< put output state chunk
+        else appendToHelp sink src =<< put sink state chunk
 
 
 
