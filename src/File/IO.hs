@@ -1,6 +1,7 @@
 module File.IO
   ( writeBinary, readBinary
   , writeUtf8, readUtf8
+  , writeBuilder
   , remove, exists
   , removeDir
   , andM
@@ -9,12 +10,13 @@ module File.IO
 
 import Control.Monad.Except (liftIO)
 import qualified Data.Binary as Binary
+import qualified Data.ByteString.Builder as BS
 import qualified Data.Text as Text
 import qualified Data.Text.IO as TextIO
 import GHC.IO.Exception ( IOErrorType(InvalidArgument) )
 import qualified System.Directory as Dir
 import System.FilePath (dropFileName)
-import System.IO (utf8, hSetEncoding, withFile, Handle, IOMode(ReadMode, WriteMode))
+import qualified System.IO as IO
 import System.IO.Error (ioeGetErrorType, annotateIOError, modifyIOError)
 
 import qualified Reporting.Error as Error
@@ -60,14 +62,14 @@ throwCorruptBinary filePath =
 
 writeUtf8 :: FilePath -> Text.Text -> IO ()
 writeUtf8 filePath text =
-  withUtf8 filePath WriteMode $ \handle ->
+  withUtf8 filePath IO.WriteMode $ \handle ->
     TextIO.hPutStr handle text
 
 
-withUtf8 :: FilePath -> IOMode -> (Handle -> IO a) -> IO a
+withUtf8 :: FilePath -> IO.IOMode -> (IO.Handle -> IO a) -> IO a
 withUtf8 filePath mode callback =
-  withFile filePath mode $ \handle ->
-    do  hSetEncoding handle utf8
+  IO.withFile filePath mode $ \handle ->
+    do  IO.hSetEncoding handle IO.utf8
         callback handle
 
 
@@ -77,7 +79,7 @@ withUtf8 filePath mode callback =
 
 readUtf8 :: FilePath -> IO Text.Text
 readUtf8 filePath =
-  withUtf8 filePath ReadMode $ \handle ->
+  withUtf8 filePath IO.ReadMode $ \handle ->
     modifyIOError
       (encodingError filePath)
       (TextIO.hGetContents handle)
@@ -95,6 +97,17 @@ encodingError filePath ioError =
 
     _ ->
       ioError
+
+
+
+-- WRITE BUILDER
+
+
+writeBuilder :: FilePath -> BS.Builder -> IO ()
+writeBuilder path builder =
+  IO.withBinaryFile path IO.WriteMode $ \handle ->
+    do  IO.hSetBuffering handle (IO.BlockBuffering Nothing)
+        BS.hPutBuilder handle builder
 
 
 

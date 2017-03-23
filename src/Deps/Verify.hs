@@ -5,11 +5,11 @@ import Control.Concurrent (forkIO)
 import Control.Concurrent.MVar (MVar, newMVar, newEmptyMVar, putMVar, readMVar, takeMVar)
 import Control.Monad (filterM, forM, void)
 import Control.Monad.Trans (liftIO)
+import qualified Data.ByteString.Builder as Builder
 import qualified Data.ByteString.Lazy as BS
 import qualified Data.Map as Map
 import qualified Data.Maybe as Maybe
 import qualified Data.Set as Set
-import qualified Data.Text.Lazy as Text
 import Data.Map (Map)
 import Data.Set (Set)
 import System.Directory (doesDirectoryExist)
@@ -311,9 +311,9 @@ updateCache root name info solution results =
               IO.writeBinary path deps
               let resultList = Map.elems results
               let docs = Maybe.mapMaybe Compiler._docs resultList
-              let bundle = Text.concat (map Compiler._js resultList)
+              let bundle = mconcat (map Compiler._js resultList)
               liftIO $ do
-                IO.writeUtf8 (root </> "bundle.js") (Text.toStrict bundle)
+                IO.writeBuilder (root </> "bundle.js") bundle
                 BS.writeFile (root </> "documentation.json") (Docs.prettyJson docs)
 
       return ifaces

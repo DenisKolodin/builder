@@ -9,7 +9,7 @@ import Control.Concurrent.MVar (newEmptyMVar, putMVar, readMVar)
 import Control.Monad (foldM, void)
 import Control.Monad.Except (liftIO)
 import qualified Data.Binary as Binary
-import qualified Data.Text.Lazy.IO as LText
+import qualified Data.ByteString.Builder as BS
 import qualified Data.Map as Map
 import Data.Map (Map)
 
@@ -17,6 +17,7 @@ import qualified Elm.Compiler as Compiler
 import qualified Elm.Compiler.Module as Module
 
 import File.Compile (Answer(..))
+import qualified File.IO as IO
 import qualified Reporting.Error.Compile as E
 import qualified Reporting.Error as Error
 import qualified Reporting.Task as Task
@@ -47,7 +48,7 @@ write answers =
       do  mvar <- newEmptyMVar
           void $ forkIO $
             do  Binary.encodeFile (Paths.elmi name) ifaces
-                LText.writeFile (Paths.elmo name) js
+                IO.writeBuilder (Paths.elmo name) js
                 putMVar mvar result
           return mvar
   in
