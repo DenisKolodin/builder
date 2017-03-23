@@ -1,29 +1,194 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
-module Pipeline.Generate where
+module File.Generate
+  ( generate
+  , Config(..)
+  )
+  where
 
-import Control.Monad.Except (forM_, liftIO)
-import Data.Aeson ((.=))
-import qualified Data.Aeson as Json
-import qualified Data.Graph as Graph
+
+import Control.Monad (foldM)
+import Control.Monad.Trans (liftIO)
+import qualified Data.Binary.Get as Binary
+import qualified Data.ByteString as BS
+import qualified Data.ByteString.Builder as BS
+import qualified Data.ByteString.Builder.Extra as BS (defaultChunkSize)
+import qualified Data.ByteString.Lazy as LBS
+import qualified Data.Digest.Pure.SHA as SHA
 import qualified Data.List as List
 import qualified Data.Map as Map
-import qualified Data.Maybe as Maybe
 import qualified Data.Set as Set
-import qualified Data.Text as Text
-import qualified Data.Text.IO as Text
-import qualified Data.Text.Lazy as LazyText
-import qualified Data.Text.Lazy.Encoding as LazyText
-import qualified Data.Text.Lazy.IO as LazyText
-import qualified Data.Tree as Tree
-import Elm.Utils ((|>))
-import qualified Elm.Compiler as Elm
+import qualified System.Directory as Dir
+import qualified System.IO as IO
+
+import qualified Elm.Compiler as Compiler
 import qualified Elm.Compiler.Module as Module
 import qualified Elm.Docs as Docs
 import qualified Elm.Package as Pkg
-import System.Directory ( createDirectoryIfMissing )
-import System.FilePath ( dropFileName )
-import System.IO ( IOMode(WriteMode) )
+
+import qualified Elm.Project.BuildPlan as BP
+import qualified Elm.Project.Json as Project
+import qualified Elm.Project.Summary as Summary
+import qualified File.Crawl as Crawl
+import qualified Reporting.Task as Task
+import qualified Stuff.Paths as Paths
+
+
+
+-- GENERATE
+
+
+type Results = Map.Map Module.Raw Compiler.Result
+
+
+data Config
+  = Only [Module.Raw]
+  | Everything Summary.Summary
+
+
+generate :: Crawl.Graph () -> Results -> Config -> Task.Task ()
+generate graph results config =
+  case config of
+    Only roots ->
+      do  let (elmos, pkgs) = sortElmos graph results roots
+          error "TODO"
+
+    Everything (Summary.Summary _ project _ _) ->
+      case project of
+        Project.Pkg _ ->
+          return ()
+
+        Project.App _ Nothing ->
+          return ()
+
+        Project.App _ (Just (BP.BuildPlan cache pages bundles endpoint outputDir)) ->
+          do  let (elmos, _) = sortElmos graph results (map BP._elm pages)
+              liftIO (write elmos)
+
+
+
+-- TOPOLOGICAL SORT
+
+
+data Elmo = Source BS.Builder | File FilePath
+
+
+sortElmos :: Crawl.Graph () -> Results -> [Module.Raw] -> ([Elmo], Set.Set (Pkg.Name, Pkg.Version))
+sortElmos graph results roots =
+  let
+    (State pkgs elmos _) =
+      List.foldl' (sort graph results) (State Set.empty [] Set.empty) roots
+  in
+    (elmos, pkgs)
+
+
+data State =
+  State
+    { _pkgs :: !(Set.Set (Pkg.Name, Pkg.Version))
+    , _elmos :: ![Elmo]
+    , _visited :: !(Set.Set Module.Raw)
+    }
+
+
+sort :: Crawl.Graph () -> Results -> State -> Module.Raw -> State
+sort graph@(Crawl.Graph locals natives foreigns _) results state@(State pkgs elmos visited) name =
+  if Set.member name visited then
+    state
+
+  else
+    case Map.lookup name locals of
+      Just info ->
+        sortLocal graph results name info state
+
+      Nothing ->
+        case Map.lookup name foreigns of
+          Just pkg ->
+            State (Set.insert pkg pkgs) elmos (Set.insert name visited)
+
+          Nothing ->
+            case Map.lookup name natives of
+              Just path ->
+                State pkgs (File path : elmos) (Set.insert name visited)
+
+              Nothing ->
+                error "compiler bug is manifesting in File.Generate"
+
+
+sortLocal :: Crawl.Graph () -> Results -> Module.Raw -> Crawl.Info -> State -> State
+sortLocal graph results name (Crawl.Info path _ imports) state =
+  let
+    (State pkgs elmos visited) =
+      List.foldl' (sort graph results) state imports
+
+    elmo =
+      case Map.lookup name results of
+        Nothing ->
+          File (Paths.elmo name)
+
+        Just (Compiler.Result _ _ js) ->
+          Source js
+  in
+    State pkgs (elmo : elmos) (Set.insert name visited)
+
+
+
+-- WRITE JS FILE
+
+
+write :: [Elmo] -> IO ()
+write elmos =
+  do  hash <-
+        IO.withBinaryFile "temp.js" IO.WriteMode $ \handle ->
+          toHash <$> foldM (writeElmo handle) (ShaState 0 SHA.sha1Incremental) elmos
+
+      Dir.renameFile "temp.js" (hash ++ ".js")
+
+
+data ShaState =
+  ShaState
+    { _length :: !Int
+    , _decoder :: !(Binary.Decoder SHA.SHA1State)
+    }
+
+
+toHash :: ShaState -> String
+toHash (ShaState len decoder) =
+  SHA.showDigest $ SHA.completeSha1Incremental decoder len
+
+
+writeElmo :: IO.Handle -> ShaState -> Elmo -> IO ShaState
+writeElmo handle state elmo =
+  case elmo of
+    Source builder ->
+      foldM (put handle) state $
+        LBS.toChunks (BS.toLazyByteString builder)
+
+    File path ->
+      IO.withBinaryFile path IO.ReadMode $ \handle2 ->
+        copyFile handle handle2 state
+
+
+put :: IO.Handle -> ShaState -> BS.ByteString -> IO ShaState
+put handle (ShaState len decoder) chunk =
+  do  BS.hPut handle chunk
+      return $ ShaState (len + BS.length chunk) (Binary.pushChunk decoder chunk)
+
+
+copyFile :: IO.Handle -> IO.Handle -> ShaState -> IO ShaState
+copyFile output input state =
+  do  chunk <- BS.hGet input BS.defaultChunkSize
+      if BS.null chunk
+        then return state
+        else copyFile output input =<< put output state chunk
+
+
+
+{-- GENERATE HTML
+
+import Data.Aeson ((.=))
+import qualified Data.Aeson as Json
+import qualified Data.List as List
+
 import qualified Text.Blaze as Blaze
 import Text.Blaze.Html5 ((!))
 import qualified Text.Blaze.Html5 as H
@@ -31,125 +196,8 @@ import qualified Text.Blaze.Html5.Attributes as A
 import qualified Text.Blaze.Renderer.Text as Blaze
 import Text.RawString.QQ (r)
 
-import qualified BuildManager as BM
-import qualified Path
-import qualified TheMasterPlan as TMP
-import qualified Utils.File as File
 
-
-
--- GENERATE DOCS
-
-
-docs :: [Docs.Documentation] -> FilePath -> BM.Task ()
-docs docsList path =
-  Docs.prettyJson docsList
-    |> LazyText.decodeUtf8
-    |> LazyText.replace "\\u003e" ">"
-    |> LazyText.writeFile path
-    |> liftIO
-
-
-
--- GENERATE ELM STUFF
-
-
-generate
-    :: BM.Config
-    -> Map.Map TMP.CanonicalModule Module.Interface
-    -> Map.Map TMP.CanonicalModule [TMP.CanonicalModule]
-    -> Map.Map TMP.CanonicalModule TMP.Location
-    -> [TMP.CanonicalModule]
-    -> BM.Task ()
-
-generate _config _interfaces _dependencies _natives [] =
-  return ()
-
-generate config interfaces dependencies natives rootModules =
-  do  let objectFiles =
-            setupNodes (BM._artifactDirectory config) dependencies natives
-              |> getReachableObjectFiles (BM._debug config) rootModules
-
-      let outputFile = BM.outputFilePath config
-      liftIO (createDirectoryIfMissing True (dropFileName outputFile))
-
-      let footer = createFooter (BM._debug config) interfaces rootModules
-
-      case BM._output config of
-        BM.Html outputFile ->
-          liftIO $
-            do  js <- mapM File.readTextUtf8 objectFiles
-                let (TMP.CanonicalModule _ moduleName) = head rootModules
-                let outputText = html (Text.concat (header : js ++ [footer])) moduleName
-                LazyText.writeFile outputFile outputText
-
-        BM.JS outputFile ->
-          liftIO $
-          File.withFileUtf8 outputFile WriteMode $ \handle ->
-              do  Text.hPutStrLn handle header
-                  forM_ objectFiles $ \jsFile ->
-                      Text.hPutStrLn handle =<< File.readTextUtf8 jsFile
-                  Text.hPutStrLn handle footer
-
-        BM.DevNull ->
-          return ()
-
-      liftIO (putStrLn ("Successfully generated " ++ outputFile))
-
-
-setupNodes
-    :: FilePath
-    -> Map.Map TMP.CanonicalModule [TMP.CanonicalModule]
-    -> Map.Map TMP.CanonicalModule TMP.Location
-    -> [(FilePath, TMP.CanonicalModule, [TMP.CanonicalModule])]
-setupNodes cachePath dependencies natives =
-    let nativeNodes =
-            Map.toList natives
-              |> map (\(name, loc) -> (Path.toSource loc, name, []))
-
-        dependencyNodes =
-            Map.toList dependencies
-              |> map (\(name, deps) -> (Path.toObjectFile cachePath name, name, deps))
-    in
-        nativeNodes ++ dependencyNodes
-
-
-getReachableObjectFiles
-  :: Bool
-  -> [TMP.CanonicalModule]
-  -> [(FilePath, TMP.CanonicalModule, [TMP.CanonicalModule])]
-  -> [FilePath]
-getReachableObjectFiles debug moduleNames allNodes =
-  let
-    nodes =
-      if debug then allNodes else filter (not . isVirtualDomDebug) allNodes
-
-    (dependencyGraph, vertexToKey, keyToVertex) =
-      Graph.graphFromEdges nodes
-
-    reachableSet =
-      Maybe.mapMaybe keyToVertex moduleNames
-        |> Graph.dfs dependencyGraph
-        |> concatMap Tree.flatten
-        |> Set.fromList
-  in
-    Graph.topSort dependencyGraph
-      |> filter (\vtx -> Set.member vtx reachableSet)
-      |> reverse
-      |> map vertexToKey
-      |> map (\(path, _, _) -> path)
-
-
-isVirtualDomDebug :: (fp, TMP.CanonicalModule, deps) -> Bool
-isVirtualDomDebug (_filePath, TMP.CanonicalModule (pkg, _vsn) name, _deps) =
-  pkg == Pkg.virtualDom && name == "VirtualDom.Debug"
-
-
-
--- GENERATE HTML
-
-
-html :: Text.Text -> Module.Raw -> LazyText.Text
+html :: Text.Text -> Module.Raw -> LText.Text
 html generatedJavaScript moduleName =
   Blaze.renderMarkup $
     H.docTypeHtml $ do
@@ -228,9 +276,9 @@ createDebugMetadata interfaces canonicalName =
   in
     Json.object metadataFields
       |> Json.encode
-      |> LazyText.decodeUtf8
-      |> LazyText.replace "\\u003e" ">"
-      |> LazyText.unpack
+      |> LText.decodeUtf8
+      |> LText.replace "\\u003e" ">"
+      |> LText.unpack
 
 
 setup :: [String] -> String
@@ -435,3 +483,6 @@ function A9(fun, a, b, c, d, e, f, g, h, i)
     : fun(a)(b)(c)(d)(e)(f)(g)(h)(i);
 }
 |]
+
+
+-}

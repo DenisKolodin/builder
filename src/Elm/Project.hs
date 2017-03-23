@@ -19,6 +19,7 @@ import Elm.Project.Summary (Summary)
 import qualified File.Artifacts as Artifacts
 import qualified File.Compile as Compile
 import qualified File.Crawl as Crawl
+import qualified File.Generate as Generate
 import qualified File.Plan as Plan
 import qualified Reporting.Task as Task
 
@@ -41,15 +42,14 @@ getRootWithReplFallback =
 -- COMPILE
 
 
-compile :: Summary -> Task.Task (Map Module.Raw Compiler.Result)
+compile :: Summary -> Task.Task ()
 compile summary =
   do  graph <- Crawl.crawl summary
       (dirty, ifaces) <- Plan.plan summary graph
       let project = Summary._project summary
       answers <- Compile.compile project ifaces dirty
       results <- Artifacts.write answers
-      -- TODO generate JS code
-      return results
+      Generate.generate graph results (Generate.Everything summary)
 
 
 compileSource :: Summary -> FilePath -> Text -> Task.Task (Map Module.Raw Compiler.Result)
