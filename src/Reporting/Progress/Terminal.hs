@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -Wall #-}
 module Reporting.Progress.Terminal
   ( create
   )
