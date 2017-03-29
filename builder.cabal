@@ -52,7 +52,6 @@ Library
     other-modules:
         Deps.Explorer,
         Deps.Get,
-        Deps.Paths,
         Deps.Solver.Internal,
         Deps.Verify,
         Deps.Website,
