@@ -9,7 +9,6 @@ import Control.Concurrent.MVar (newEmptyMVar, putMVar, readMVar)
 import Control.Monad (foldM, void)
 import Control.Monad.Except (liftIO)
 import qualified Data.Binary as Binary
-import qualified Data.ByteString.Builder as BS
 import qualified Data.Map as Map
 import Data.Map (Map)
 
@@ -17,7 +16,6 @@ import qualified Elm.Compiler as Compiler
 import qualified Elm.Compiler.Module as Module
 
 import File.Compile (Answer(..))
-import qualified File.IO as IO
 import qualified Reporting.Error.Compile as E
 import qualified Reporting.Error as Error
 import qualified Reporting.Task as Task
@@ -31,7 +29,7 @@ import qualified Stuff.Paths as Paths
 ignore :: Map Module.Raw Answer -> Task.Task (Map Module.Raw Compiler.Result)
 ignore answers =
   let
-    ignorer name result =
+    ignorer _name result =
       return result
   in
     gather ignorer answers
@@ -44,11 +42,11 @@ ignore answers =
 write :: Map Module.Raw Answer -> Task.Task (Map Module.Raw Compiler.Result)
 write answers =
   let
-    writer name result@(Compiler.Result _ ifaces js) =
+    writer name result@(Compiler.Result _ ifaces objs) =
       do  mvar <- newEmptyMVar
           void $ forkIO $
             do  Binary.encodeFile (Paths.elmi name) ifaces
-                IO.writeBuilder (Paths.elmo name) js
+                Binary.encodeFile (Paths.elmo name) objs
                 putMVar mvar result
           return mvar
   in

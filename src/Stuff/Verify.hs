@@ -35,8 +35,8 @@ verify root project =
 
       if fresh
         then
-          do  (exposed, ifaces) <- IO.readBinary Path.summary
-              return (Summary.Summary root project exposed ifaces)
+          do  (exposed, ifaces, graph) <- IO.readBinary Path.summary
+              return (Summary.Summary root project exposed ifaces graph)
         else
           rebuildCache root project
 
@@ -49,8 +49,8 @@ rebuildCache root project =
       (solution, summary) <- Verify.verify root project
 
       IO.writeBinary Path.solution solution
-      let (Summary.Summary _ _ exposed ifaces) = summary
-      IO.writeBinary Path.summary (exposed, ifaces)
+      let (Summary.Summary _ _ exposed ifaces graph) = summary
+      IO.writeBinary Path.summary (exposed, ifaces, graph)
       return summary
 
 

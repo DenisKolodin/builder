@@ -1,4 +1,5 @@
 {-# OPTIONS_GHC -Wall #-}
+{-# LANGUAGE OverloadedStrings #-}
 module Elm.Project
   ( getRoot
   , getRootWithReplFallback
@@ -20,8 +21,8 @@ import Elm.Project.Summary (Summary)
 import qualified File.Artifacts as Artifacts
 import qualified File.Compile as Compile
 import qualified File.Crawl as Crawl
-import qualified File.Generate as Generate
 import qualified File.Plan as Plan
+import qualified Generate.Output as Output
 import qualified Reporting.Task as Task
 
 
@@ -50,7 +51,7 @@ compile summary =
       let project = Summary._project summary
       answers <- Compile.compile project ifaces dirty
       results <- Artifacts.write answers
-      Generate.generate graph results (Generate.Everything summary)
+      Output.generate summary graph "Main"
 
 
 compileSource :: Summary -> FilePath -> Text -> Task.Task (Map Module.Raw Compiler.Result)

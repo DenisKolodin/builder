@@ -1,7 +1,7 @@
 {-# OPTIONS_GHC -Wall #-}
 {-# LANGUAGE OverloadedStrings #-}
-module Elm.Project.BuildPlan
-  ( BuildPlan(..)
+module Generate.Plan
+  ( Plan(..)
   , Page(..)
   , parse
   )
@@ -22,11 +22,11 @@ import qualified Json.Decode as D
 
 
 
--- BUILD PLAN
+-- PLAN
 
 
-data BuildPlan =
-  BuildPlan
+data Plan =
+  Plan
     { _cache :: Module.Raw
     , _pages :: [Page]
     , _bundles :: [[Pkg.Name]]
@@ -47,7 +47,7 @@ data Page =
 -- PARSE
 
 
-parse :: BS.ByteString -> Task.Task BuildPlan
+parse :: BS.ByteString -> Task.Task Plan
 parse bytestring =
   case D.parse planDecoder bytestring of
     Left Nothing ->
@@ -74,9 +74,9 @@ throw problem =
 -- JSON
 
 
-planDecoder :: D.Decoder BuildPlan
+planDecoder :: D.Decoder Plan
 planDecoder =
-  BuildPlan
+  Plan
     <$> D.field "cache" D.moduleName
     <*> D.field "pages" (D.list pageDecoder)
     <*> D.field "bundles" (D.list (D.list D.packageName))
@@ -96,8 +96,8 @@ pageDecoder =
 -- VALIDATE
 
 
-detectProblems :: BuildPlan -> Maybe a
-detectProblems (BuildPlan cache pages bundles _ _) =
+detectProblems :: Plan -> Maybe a
+detectProblems (Plan cache pages bundles _ _) =
   let
     uniquePages =
       Set.fromList (map _elm pages)

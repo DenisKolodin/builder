@@ -36,9 +36,9 @@ import qualified Elm.Compiler.Module as Module
 import qualified Elm.Package as Pkg
 import Elm.Package (Name, Version)
 
-import qualified Elm.Project.BuildPlan as BP
 import qualified Elm.Project.Constraint as Con
 import qualified Elm.Project.Licenses as Licenses
+import qualified Generate.Plan as Plan
 import qualified Json.Decode as D
 import qualified Json.Encode as E
 
@@ -48,7 +48,7 @@ import qualified Json.Encode as E
 
 
 data Project
-  = App AppInfo (Maybe BP.BuildPlan)
+  = App AppInfo (Maybe Plan.Plan)
   | Pkg PkgInfo
 
 
@@ -181,7 +181,7 @@ getRoots project =
       []
 
     App _ (Just plan) ->
-      map BP._elm (BP._pages plan)
+      map Plan._elm (Plan._pages plan)
 
 
 

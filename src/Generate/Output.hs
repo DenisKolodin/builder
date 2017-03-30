@@ -1,162 +1,69 @@
 {-# OPTIONS_GHC -Wall #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
-module File.Generate
+module Generate.Output
   ( generate
-  , Config(..)
   )
   where
 
 
 import Control.Monad (foldM)
 import Control.Monad.Trans (liftIO)
-import qualified Data.ByteString.Builder as BS
-import qualified Data.ByteString.Lazy as LBS
-import qualified Data.List as List
-import qualified Data.Map as Map
-import qualified Data.Set as Set
+import Data.Map ((!))
 import qualified System.Directory as Dir
+import System.FilePath ((</>), (<.>))
 import qualified System.IO as IO
 
 import qualified Elm.Compiler as Compiler
 import qualified Elm.Compiler.Module as Module
-import qualified Elm.Docs as Docs
+import qualified Elm.Compiler.Objects as Obj
 import qualified Elm.Package as Pkg
 
-import qualified Elm.Project.BuildPlan as BP
 import qualified Elm.Project.Json as Project
 import qualified Elm.Project.Summary as Summary
 import qualified File.Crawl as Crawl
 import qualified File.Hash as Hash
+import qualified Generate.Organize as Organize
 import qualified Reporting.Task as Task
-import qualified Stuff.Paths as Paths
 
 
 
 -- GENERATE
 
 
-type Results = Map.Map Module.Raw Compiler.Result
+generate :: Summary.Summary -> Crawl.Graph () -> Module.Raw -> Task.Task ()
+generate summary@(Summary.Summary _ project _ _ deps) graph name =
+  do  cacheDir <- Task.getPackageCacheDir
 
+      objectGraph <- Organize.organize summary graph
+      let root = Obj.root (Project.getName project) name
+      let (natives, builder) = Compiler.generate objectGraph root
 
-data Config
-  = Only [Module.Raw]
-  | Everything Summary.Summary
+      hash <- liftIO $ IO.withBinaryFile "temp.js" IO.WriteMode $ \handle ->
+        do  let append = appendNative handle cacheDir deps
+            state <- foldM append Hash.starter natives
+            Hash.putBuilder handle state builder
 
-
-generate :: Crawl.Graph () -> Results -> Config -> Task.Task ()
-generate graph results config =
-  case config of
-    Only roots ->
-      do  let (objs, pkgs) = toObjFiles graph results roots
-          error "TODO"
-
-    Everything (Summary.Summary _ project _ _) ->
-      case project of
-        Project.Pkg _ ->
-          return ()
-
-        Project.App _ Nothing ->
-          return ()
-
-        Project.App _ (Just (BP.BuildPlan cache pages bundles endpoint outputDir)) ->
-          do  let (objs, _) = toObjFiles graph results (map BP._elm pages)
-              liftIO (writeObjFiles objs)
+      liftIO $ Dir.renameFile "temp.js" (Hash.toString hash ++ ".js")
 
 
 
--- OBJECT FILES
+-- APPEND NATIVES
 
 
-data ObjFile
-  = Source BS.Builder
-  | File FilePath
+appendNative :: IO.Handle -> FilePath -> Summary.DepsGraph -> Hash.State -> Module.Canonical -> IO Hash.State
+appendNative handle cacheDir deps state name =
+  Hash.append handle (pathTo cacheDir deps name) state
 
 
-toObjFiles :: Crawl.Graph () -> Results -> [Module.Raw] -> ([ObjFile], Set.Set (Pkg.Name, Pkg.Version))
-toObjFiles graph results roots =
-  let
-    (SortState objs pkgs _) =
-      List.foldl' (sort graph results) (SortState [] Set.empty Set.empty) roots
-  in
-    (reverse objs, pkgs)
-
-
-
--- TOPOLOGICAL SORT
-
-
-data SortState =
-  SortState
-    { _objs :: ![ObjFile]
-    , _pkgs :: !(Set.Set (Pkg.Name, Pkg.Version))
-    , _visited :: !(Set.Set Module.Raw)
-    }
-
-
-sort :: Crawl.Graph () -> Results -> SortState -> Module.Raw -> SortState
-sort graph@(Crawl.Graph locals natives foreigns _) results state@(SortState objs pkgs visited) name =
-  if Set.member name visited then
-    state
-
-  else
-    case Map.lookup name locals of
-      Just info ->
-        sortLocal graph results name info state
-
-      Nothing ->
-        case Map.lookup name foreigns of
-          Just pkg ->
-            SortState objs (Set.insert pkg pkgs) (Set.insert name visited)
-
-          Nothing ->
-            case Map.lookup name natives of
-              Just path ->
-                SortState (File path : objs) pkgs (Set.insert name visited)
-
-              Nothing ->
-                error "compiler bug is manifesting in File.Generate"
-
-
-sortLocal :: Crawl.Graph () -> Results -> Module.Raw -> Crawl.Info -> SortState -> SortState
-sortLocal graph results name (Crawl.Info path _ imports) state =
-  let
-    (SortState objs pkgs visited) =
-      List.foldl' (sort graph results) state imports
-
-    obj =
-      case Map.lookup name results of
-        Nothing ->
-          File (Paths.elmo name)
-
-        Just (Compiler.Result _ _ js) ->
-          Source js
-  in
-    SortState (obj : objs) pkgs (Set.insert name visited)
-
-
-
--- WRITE OBJECT FILES
-
-
-writeObjFiles :: [ObjFile] -> IO ()
-writeObjFiles objs =
-  do  hash <-
-        IO.withBinaryFile "temp.js" IO.WriteMode $ \handle ->
-          Hash.toString <$> foldM (writeObjFile handle) Hash.starter objs
-
-      Dir.renameFile "temp.js" (hash ++ ".js")
-
-
-writeObjFile :: IO.Handle -> Hash.State -> ObjFile -> IO Hash.State
-writeObjFile handle state elmo =
-  case elmo of
-    Source builder ->
-      foldM (Hash.put handle) state $
-        LBS.toChunks (BS.toLazyByteString builder)
-
-    File path ->
-      Hash.append handle path state
+pathTo :: FilePath -> Summary.DepsGraph -> Module.Canonical -> FilePath
+pathTo cacheDir deps (Module.Canonical pkg name) =
+  cacheDir
+  </> Pkg.toFilePath pkg
+  </> Pkg.versionToString (fst (deps ! pkg))
+  </> "src"
+  </> Module.nameToPath name
+  <.> "js"
 
 
 

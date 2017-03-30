@@ -5,7 +5,6 @@ import Control.Concurrent (forkIO)
 import Control.Concurrent.MVar (MVar, newMVar, newEmptyMVar, putMVar, readMVar, takeMVar)
 import Control.Monad (filterM, forM, void)
 import Control.Monad.Trans (liftIO)
-import qualified Data.ByteString.Builder as Builder
 import qualified Data.ByteString.Lazy as BS
 import qualified Data.Map as Map
 import qualified Data.Maybe as Maybe
@@ -16,6 +15,7 @@ import System.Directory (doesDirectoryExist)
 import System.FilePath ((</>))
 
 import qualified Elm.Compiler.Module as Module
+import qualified Elm.Compiler.Objects as Obj
 import qualified Elm.Docs as Docs
 import Elm.Package (Name, Version)
 import Elm.Project.Json (Project(..), AppInfo(..), PkgInfo(..))
@@ -268,7 +268,7 @@ isCached root solution =
   IO.andM
     [ IO.exists (root </> "cached.dat")
     , IO.exists (root </> "ifaces.dat")
-    , IO.exists (root </> "bundle.js")
+    , IO.exists (root </> "objs.dat")
     , IO.exists (root </> "documentation.json")
     , isCachedHelp solution <$> IO.readBinary (root </> "cached.dat")
     ]
@@ -310,10 +310,10 @@ updateCache root name info solution results =
           do  IO.writeBinary (root </> "ifaces.dat") ifaces
               IO.writeBinary path deps
               let resultList = Map.elems results
-              let docs = Maybe.mapMaybe Compiler._docs resultList
-              let bundle = mconcat (map Compiler._js resultList)
+              let objs = Obj.unions (map Compiler._objs resultList)
+              IO.writeBinary (root </> "objs.dat") objs
               liftIO $ do
-                IO.writeBuilder (root </> "bundle.js") bundle
+                let docs = Maybe.mapMaybe Compiler._docs resultList
                 BS.writeFile (root </> "documentation.json") (Docs.prettyJson docs)
 
       return ifaces
@@ -340,4 +340,3 @@ crushHelp exposed name (Compiler.Result _ iface _) =
 
   else
     Module.privatize iface
-

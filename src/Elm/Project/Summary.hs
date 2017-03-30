@@ -2,6 +2,7 @@
 module Elm.Project.Summary
   ( Summary(..)
   , ExposedModules
+  , DepsGraph
   , init
   , cheapInit
   )
@@ -14,7 +15,7 @@ import qualified Data.Map as Map
 import Data.Map (Map)
 
 import qualified Elm.Compiler.Module as Module
-import Elm.Package (Name, Version)
+import Elm.Package (Package(..), Name, Version)
 import Elm.Project.Json (Project(..), AppInfo(..), PkgInfo(..))
 import qualified Elm.Project.Json as Project
 
@@ -29,11 +30,16 @@ data Summary =
     , _project :: Project
     , _exposed :: ExposedModules
     , _ifaces :: Module.Interfaces
+    , _depsGraph :: DepsGraph
     }
 
 
 type ExposedModules =
-  Map.Map Module.Raw [(Name, Version)]
+  Map.Map Module.Raw [Package]
+
+
+type DepsGraph =
+  Map.Map Name ( Version, [Name] )
 
 
 
@@ -51,8 +57,11 @@ init root project deps ifaces =
 
     privatizedInterfaces =
       Map.mapMaybeWithKey (privatize exposed) ifaces
+
+    depsGraph =
+      Map.foldr toNode Map.empty deps
   in
-    Summary root project exposed privatizedInterfaces
+    Summary root project exposed privatizedInterfaces depsGraph
 
 
 privatize :: ExposedModules -> Module.Canonical -> Module.Interface -> Maybe Module.Interface
@@ -65,13 +74,18 @@ privatize exposed (Module.Canonical _ name) iface =
       Module.privatize iface
 
 
+toNode :: PkgInfo -> DepsGraph -> DepsGraph
+toNode (PkgInfo name _ _ version _ deps _ _ _) graph =
+  Map.insert name (version, Map.keys deps) graph
+
+
 
 -- MAKE CHEAP SUMMARY
 
 
 cheapInit :: FilePath -> PkgInfo -> Map Name PkgInfo -> Module.Interfaces -> Summary
 cheapInit root info deps ifaces =
-  Summary root (Pkg info) (getExposed deps (_pkg_deps info)) ifaces
+  Summary root (Pkg info) (getExposed deps (_pkg_deps info)) ifaces Map.empty
 
 
 getExposed :: Map Name PkgInfo -> Map Name a -> ExposedModules
@@ -83,7 +97,7 @@ insertExposed :: ExposedModules -> PkgInfo -> ExposedModules
 insertExposed exposed info =
   let
     home =
-      ( _pkg_name info, _pkg_version info )
+      Package (_pkg_name info) (_pkg_version info)
 
     insertModule dict modul =
       Map.insertWith (++) modul [home] dict

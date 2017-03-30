@@ -14,7 +14,6 @@ import qualified System.FilePath as FP
 import System.FilePath ((</>))
 
 import qualified Elm.Package as Pkg
-import qualified Elm.Project.BuildPlan as BP
 import qualified Elm.Project.Constraint as Con
 import qualified Elm.Project.Json as Project
 import qualified Elm.Project.Licenses as Licenses
@@ -22,6 +21,7 @@ import Elm.Project.Json (Project(..), PkgInfo(..))
 import Elm.Project.Summary (Summary)
 import qualified Elm.PerUserCache as PerUserCache
 import qualified File.IO as IO
+import qualified Generate.Plan as Plan
 import qualified Reporting.Error as Error
 import qualified Reporting.Error.Assets as E
 import qualified Reporting.Task as Task
@@ -103,7 +103,7 @@ readProject =
               throw E.BadContent
 
             Nothing ->
-              Project.App info <$> maybeReadBuildPlan
+              Project.App info <$> maybeReadPlan
 
 
 throw :: E.JsonProblem -> Task.Task a
@@ -115,17 +115,17 @@ throw problem =
 -- READ BUILD PLAN
 
 
-maybeReadBuildPlan :: Task.Task (Maybe BP.BuildPlan)
-maybeReadBuildPlan =
+maybeReadPlan :: Task.Task (Maybe Plan.Plan)
+maybeReadPlan =
   do  exists <- IO.exists "elm-build-plan.json"
       if exists
-        then Just <$> readBuildPlan
+        then Just <$> readPlan
         else return Nothing
 
 
-readBuildPlan :: Task.Task BP.BuildPlan
-readBuildPlan =
-  BP.parse =<< liftIO (BS.readFile "elm-build-plan.json")
+readPlan :: Task.Task Plan.Plan
+readPlan =
+  Plan.parse =<< liftIO (BS.readFile "elm-build-plan.json")
 
 
 

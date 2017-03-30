@@ -35,7 +35,7 @@ type Dict value = Map.Map Module.Raw value
 
 
 plan :: Summary.Summary -> Crawl.Graph () -> Task.Task (Dict Info, Module.Interfaces)
-plan (Summary.Summary root project _ ifaces) (Crawl.Graph locals _ foreigns _) =
+plan (Summary.Summary root project _ ifaces _) (Crawl.Graph locals _ foreigns _) =
   liftIO $
   do  queue <- newChan
       let env = Env queue root (Project.getName project)
@@ -85,7 +85,7 @@ data Info =
 getStatus
   :: Env
   -> MVar (Dict (MVar Status))
-  -> Dict (Pkg.Name, Pkg.Version)
+  -> Dict Pkg.Package
   -> Module.Raw
   -> Crawl.Info
   -> IO (MVar Status)
@@ -117,7 +117,7 @@ getStatus env statusMVars foreigns name (Crawl.Info path src deps) =
       return mvar
 
 
-addDep :: Dict (MVar Status) -> Dict (Pkg.Name, Pkg.Version) -> Info -> Module.Raw -> IO Info
+addDep :: Dict (MVar Status) -> Dict Pkg.Package -> Info -> Module.Raw -> IO Info
 addDep locals foreigns info name =
   case Map.lookup name locals of
     Just mvar ->
@@ -131,7 +131,7 @@ addDep locals foreigns info name =
 
     Nothing ->
       case Map.lookup name foreigns of
-        Just (pkg, _vsn) ->
+        Just (Pkg.Package pkg _vsn) ->
           return $ info { _foreign = Module.Canonical pkg name : _foreign info }
 
         Nothing ->

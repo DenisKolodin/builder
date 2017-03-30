@@ -3,15 +3,19 @@ module File.Hash
   ( State
   , starter
   , toString
-  , put
+  , putByteString
+  , putBuilder
   , append
   )
   where
 
 
+import Control.Monad (foldM)
 import qualified Data.Binary.Get as Binary
 import qualified Data.ByteString as BS
+import qualified Data.ByteString.Builder as BS
 import qualified Data.ByteString.Builder.Extra as BS (defaultChunkSize)
+import qualified Data.ByteString.Lazy as LBS
 import qualified Data.Digest.Pure.SHA as SHA
 import qualified System.IO as IO
 
@@ -41,11 +45,16 @@ toString (State len decoder) =
 -- PUT
 
 
-put :: IO.Handle -> State -> BS.ByteString -> IO State
-put handle (State len decoder) chunk =
+putByteString :: IO.Handle -> State -> BS.ByteString -> IO State
+putByteString handle (State len decoder) chunk =
   do  BS.hPut handle chunk
       return $ State (len + BS.length chunk) (Binary.pushChunk decoder chunk)
 
+
+putBuilder :: IO.Handle -> State -> BS.Builder -> IO State
+putBuilder handle state builder =
+  foldM (putByteString handle) state $
+    LBS.toChunks (BS.toLazyByteString builder)
 
 
 -- APPEND
@@ -62,4 +71,4 @@ appendHelp sink src state =
   do  chunk <- BS.hGet src BS.defaultChunkSize
       if BS.null chunk
         then return state
-        else appendHelp sink src =<< put sink state chunk
+        else appendHelp sink src =<< putByteString sink state chunk
