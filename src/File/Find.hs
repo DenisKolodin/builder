@@ -30,7 +30,7 @@ import qualified Reporting.Task as Task
 data Asset
   = Local FilePath  -- TODO carry source code to avoid 2nd read?
   | Native FilePath
-  | Foreign Pkg.Name Pkg.Version
+  | Foreign Pkg.Package
 
 
 
@@ -38,7 +38,7 @@ data Asset
 
 
 find :: Summary.Summary -> Maybe Module.Raw -> Module.Raw -> Task.Task_ E.Error Asset
-find (Summary.Summary root project exposed _) parent name =
+find (Summary.Summary root project exposed _ _) parent name =
   do
       codePaths <- liftIO $ getCodePaths root project name
 
@@ -49,8 +49,8 @@ find (Summary.Summary root project exposed _) parent name =
         ([JS path], Nothing) ->
             return (Native path)
 
-        ([], Just [(pkg, vsn)]) ->
-            return (Foreign pkg vsn)
+        ([], Just [pkg]) ->
+            return (Foreign pkg)
 
         ([], Nothing) ->
             Task.throw (E.NotFound parent)
@@ -58,7 +58,7 @@ find (Summary.Summary root project exposed _) parent name =
         (_, maybePkgs) ->
           let
             locals = map toFilePath codePaths
-            foreigns = maybe [] (map fst) maybePkgs
+            foreigns = maybe [] id maybePkgs
           in
             Task.throw (E.Duplicates locals foreigns)
 

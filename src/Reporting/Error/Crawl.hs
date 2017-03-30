@@ -16,7 +16,7 @@ import qualified Elm.Package as Pkg
 
 data Error
   = NotFound (Maybe Module.Raw) -- TODO suggest other names
-  | Duplicates [FilePath] [Pkg.Name]
+  | Duplicates [FilePath] [Pkg.Package]
   | BadHeader FilePath Compiler.Error
   | NoName FilePath Module.Raw
   | BadName FilePath Module.Raw

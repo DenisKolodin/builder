@@ -38,7 +38,7 @@ data Graph problems =
   Graph
     { _locals :: Map.Map Module.Raw Info
     , _natives :: Map.Map Module.Raw FilePath
-    , _foreigns :: Map.Map Module.Raw (Pkg.Name, Pkg.Version)
+    , _foreigns :: Map.Map Module.Raw Pkg.Package
     , _problems :: problems
     }
 
@@ -56,7 +56,7 @@ data Info =
 
 
 crawl :: Summary -> Task.Task (Graph ())
-crawl summary@(Summary _ project _ _) =
+crawl summary@(Summary _ project _ _ _) =
   do  let unvisited = map (Unvisited Nothing) (Project.getRoots project)
       graph <- dfs summary unvisited
       checkForCycles graph
@@ -64,7 +64,7 @@ crawl summary@(Summary _ project _ _) =
 
 
 crawlFromSource :: Summary -> FilePath -> Text -> Task.Task (Module.Raw, Graph ())
-crawlFromSource summary@(Summary _ project _ _) path source =
+crawlFromSource summary@(Summary _ project _ _ _) path source =
   do  (maybeName, deps) <-
         Task.mapError Error.BadCrawlRoot (parseHeader project path source)
       let name = maybe "Main" id maybeName
@@ -120,8 +120,8 @@ dfsHelp summary chan oldPending oldSeen unvisited graph =
                       let newGraph = graph { _natives = natives }
                       dfsHelp summary chan (pending - 1) seen [] newGraph
 
-                Right (Foreign name pkg vsn) ->
-                  do  let foreigns = Map.insert name (pkg, vsn) (_foreigns graph)
+                Right (Foreign name pkg) ->
+                  do  let foreigns = Map.insert name pkg (_foreigns graph)
                       let newGraph = graph { _foreigns = foreigns }
                       dfsHelp summary chan (pending - 1) seen [] newGraph
 
@@ -164,7 +164,7 @@ data Unvisited =
 data Asset
   = Local Module.Raw Info
   | Native Module.Raw FilePath
-  | Foreign Module.Raw Pkg.Name Pkg.Version
+  | Foreign Module.Raw Pkg.Package
 
 
 crawlFile :: Summary -> Unvisited -> Task.Task_ (Module.Raw, E.Error) Asset
@@ -178,8 +178,8 @@ crawlFile summary (Unvisited maybeParent name) =
           Find.Native path ->
             return (Native name path)
 
-          Find.Foreign pkg vsn ->
-            return (Foreign name pkg vsn)
+          Find.Foreign pkg ->
+            return (Foreign name pkg)
 
 
 
