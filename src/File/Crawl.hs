@@ -115,7 +115,7 @@ dfsHelp summary chan oldPending oldSeen unvisited graph =
                       let deps = map (Unvisited (Just name)) (_imports info)
                       dfsHelp summary chan (pending - 1) seen deps newGraph
 
-                Right (Native name path) ->
+                Right (Kernel name path) ->
                   do  let natives = Map.insert name path (_natives graph)
                       let newGraph = graph { _natives = natives }
                       dfsHelp summary chan (pending - 1) seen [] newGraph
@@ -163,7 +163,7 @@ data Unvisited =
 
 data Asset
   = Local Module.Raw Info
-  | Native Module.Raw FilePath
+  | Kernel Module.Raw FilePath
   | Foreign Module.Raw Pkg.Package
 
 
@@ -175,8 +175,8 @@ crawlFile summary (Unvisited maybeParent name) =
           Find.Local path ->
             readModuleHeader summary name path
 
-          Find.Native path ->
-            return (Native name path)
+          Find.Kernel path ->
+            return (Kernel name path)
 
           Find.Foreign pkg ->
             return (Foreign name pkg)

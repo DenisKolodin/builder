@@ -9,6 +9,7 @@ module Generate.Output
 
 import Control.Monad (foldM)
 import Control.Monad.Trans (liftIO)
+import qualified Data.Map as Map
 import Data.Map ((!))
 import qualified System.Directory as Dir
 import System.FilePath ((</>), (<.>))
@@ -23,6 +24,7 @@ import qualified Elm.Project.Json as Project
 import qualified Elm.Project.Summary as Summary
 import qualified File.Crawl as Crawl
 import qualified File.Hash as Hash
+import qualified Generate.BoilerPlate as BoilerPlate
 import qualified Generate.Organize as Organize
 import qualified Reporting.Task as Task
 
@@ -37,10 +39,10 @@ generate summary@(Summary.Summary _ project _ _ deps) graph name =
 
       objectGraph <- Organize.organize summary graph
       let root = Obj.root (Project.getName project) name
-      let (natives, builder) = Compiler.generate objectGraph root
+      let (natives, builder) = Compiler.generate (Obj.symbolTable Map.empty) objectGraph root
 
       hash <- liftIO $ IO.withBinaryFile "temp.js" IO.WriteMode $ \handle ->
-        do  let append = appendNative handle cacheDir deps
+        do  let append = appendKernel handle cacheDir deps
             state <- foldM append Hash.starter natives
             Hash.putBuilder handle state builder
 
@@ -48,11 +50,11 @@ generate summary@(Summary.Summary _ project _ _ deps) graph name =
 
 
 
--- APPEND NATIVES
+-- APPEND KERNELS
 
 
-appendNative :: IO.Handle -> FilePath -> Summary.DepsGraph -> Hash.State -> Module.Canonical -> IO Hash.State
-appendNative handle cacheDir deps state name =
+appendKernel :: IO.Handle -> FilePath -> Summary.DepsGraph -> Hash.State -> Module.Canonical -> IO Hash.State
+appendKernel handle cacheDir deps state name =
   Hash.append handle (pathTo cacheDir deps name) state
 
 

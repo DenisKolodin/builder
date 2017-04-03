@@ -29,7 +29,7 @@ import qualified Reporting.Task as Task
 
 data Asset
   = Local FilePath  -- TODO carry source code to avoid 2nd read?
-  | Native FilePath
+  | Kernel FilePath
   | Foreign Pkg.Package
 
 
@@ -47,7 +47,7 @@ find (Summary.Summary root project exposed _ _) parent name =
             return (Local path)
 
         ([JS path], Nothing) ->
-            return (Native path)
+            return (Kernel path)
 
         ([], Just [pkg]) ->
             return (Foreign pkg)
@@ -91,7 +91,7 @@ getCodePaths root project name =
   do  let srcDirs = map (root </>) (Project.getSourceDirs project)
       elm <- mapM (elmExists name) srcDirs
       Maybe.catMaybes <$>
-        if Text.isPrefixOf "Native." name && Project.isKernel project then
+        if Text.isPrefixOf "Elm.Kernel." name && Project.isKernel project then
           (++ elm) <$> mapM (jsExists name) srcDirs
 
         else
