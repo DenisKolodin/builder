@@ -70,8 +70,6 @@ Library
         Generate.Plan,
         Generate.Organize,
         Generate.Output,
-        Json.Decode,
-        Json.Encode,
         Reporting.Error,
         Reporting.Error.Assets,
         Reporting.Error.Compile,
