@@ -77,9 +77,9 @@ throw problem =
 planDecoder :: D.Decoder Plan
 planDecoder =
   Plan
-    <$> D.field "cache" D.moduleName
+    <$> D.field "cache" Module.decoder
     <*> D.field "pages" (D.list pageDecoder)
-    <*> D.field "bundles" (D.list (D.list D.packageName))
+    <*> D.field "bundles" (D.list (D.list Pkg.decoder))
     <*> D.field "endpoint" D.text
     <*> D.field "output-directory" (D.map Text.unpack D.text)
 
@@ -87,7 +87,7 @@ planDecoder =
 pageDecoder :: D.Decoder Page
 pageDecoder =
   Page
-    <$> D.field "elm" D.moduleName
+    <$> D.field "elm" Module.decoder
     <*> D.field "css" (D.list D.text)
     <*> D.field "js" (D.list D.text)
 

@@ -268,11 +268,11 @@ appDecoder =
 pkgDecoder :: D.Decoder PkgInfo
 pkgDecoder =
   PkgInfo
-    <$> D.field "name" D.packageName
+    <$> D.field "name" Pkg.decoder
     <*> D.field "summary" summaryDecoder
     <*> D.field "license" licenseDecoder
     <*> D.field "version" versionDecoder
-    <*> D.field "exposed-modules" (D.list D.moduleName)
+    <*> D.field "exposed-modules" (D.list Module.decoder)
     <*> D.field "dependencies" (depsDecoder constraintDecoder)
     <*> D.field "test-dependencies" (depsDecoder constraintDecoder)
     <*> D.field "elm-version" constraintDecoder
