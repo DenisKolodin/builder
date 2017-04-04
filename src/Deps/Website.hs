@@ -10,7 +10,6 @@ module Deps.Website
 
 import qualified Codec.Archive.Zip as Zip
 import Control.Monad.Trans (liftIO)
-import qualified Data.Aeson as Json
 import qualified Data.Binary as Binary
 import qualified Data.Binary.Get as Binary
 import qualified Data.ByteString as BS
@@ -24,6 +23,7 @@ import System.FilePath ((</>))
 
 import Elm.Package (Name, Version)
 import qualified Elm.Package as Pkg
+import qualified Json.Decode as Decode
 
 import qualified Reporting.Progress as Progress
 import qualified Reporting.Task as Task
@@ -54,23 +54,23 @@ packageUrl name version filePath =
 
 getNewPackages :: Int -> Task.Task [(Name, Version)]
 getNewPackages index =
-  map _newPkg <$> fetchJson ("all-packages/since/" ++ show index)
+  fetchJson (Decode.list newPkgDecoder) ("all-packages/since/" ++ show index)
 
 
-data NewPkg =
-  NewPkg { _newPkg :: (Name, Version) }
-
-
-instance Json.FromJSON NewPkg where
-  parseJSON =
-    Json.withText "new-package" $ \text ->
-      case Text.splitOn "@" text of
+newPkgDecoder :: Decode.Decoder ( Name, Version )
+newPkgDecoder =
+  do  txt <- Decode.text
+      case Text.splitOn "@" txt of
         [key, value] ->
-          do  name <- Json.parseJSON (Json.String key)
-              vsn <- Json.parseJSON (Json.String value)
-              return (NewPkg (name, vsn))
+          case (,) <$> Pkg.fromText key <*> Pkg.versionFromText value of
+            Right newPkg ->
+              Decode.succeed newPkg
+
+            Left _ ->
+              Decode.fail "a new package like \"elm-lang/core@6.0.1\""
+
         _ ->
-          fail (show text ++ " cannot have multiple @ symbols.")
+          Decode.fail "a new package like \"elm-lang/core@6.0.1\""
 
 
 
@@ -79,24 +79,22 @@ instance Json.FromJSON NewPkg where
 
 getAllPackages :: Task.Task (Map.Map Name [Version])
 getAllPackages =
-  _allPkgs <$> fetchJson "all-packages"
+  fetchJson allPkgsDecoder "all-packages"
 
 
-data AllPkgs =
-  AllPkgs { _allPkgs :: Map.Map Name [Version] }
+allPkgsDecoder :: Decode.Decoder (Map.Map Name [Version])
+allPkgsDecoder =
+  let
+    depair (key, value) =
+      (,) <$> Pkg.fromText key <*> pure value
+  in
+    do  dict <- Decode.dict (Decode.list Pkg.versionDecoder)
+        case traverse depair (HashMap.toList dict) of
+          Left _ ->
+            Decode.fail "valid package names"
 
-
-instance Json.FromJSON AllPkgs where
-  parseJSON =
-    let
-      depair (key, value) =
-        do  name <- Json.parseJSON (Json.String key)
-            versions <- Json.parseJSON value
-            return (name, versions)
-    in
-      Json.withObject "all-packages" $ \obj ->
-        do  kvs <- traverse depair (HashMap.toList obj)
-            return (AllPkgs (Map.fromList kvs))
+          Right pairs ->
+            Decode.succeed (Map.fromList pairs)
 
 
 
@@ -110,17 +108,16 @@ fetchByteString path =
         return $ Right $ Client.responseBody response
 
 
-fetchJson :: (Json.FromJSON a) => String -> Task.Task a
-fetchJson path =
+fetchJson :: Decode.Decoder a -> String -> Task.Task a
+fetchJson decoder path =
   Task.fetch path [] $ \request manager ->
     do  response <- Client.httpLbs request manager
-        let bits = Client.responseBody response
-        case Json.eitherDecode bits of
+        case Decode.parse decoder (Client.responseBody response) of
           Right value ->
             return (Right value)
 
-          Left msg ->
-            return (Left ("I received corrupt JSON from server.\n" ++ msg))
+          Left _ ->
+            return (Left ("I received corrupt JSON from server. TODO explain"))
 
 
 
