@@ -5,7 +5,6 @@ import Control.Concurrent (forkIO)
 import Control.Concurrent.MVar (MVar, newMVar, newEmptyMVar, putMVar, readMVar, takeMVar)
 import Control.Monad (filterM, forM, void)
 import Control.Monad.Trans (liftIO)
-import qualified Data.ByteString.Lazy as BS
 import qualified Data.Map as Map
 import qualified Data.Maybe as Maybe
 import qualified Data.Set as Set
@@ -19,6 +18,7 @@ import qualified Elm.Compiler.Objects as Obj
 import qualified Elm.Docs as Docs
 import Elm.Package (Name, Version)
 import Elm.Project.Json (Project(..), AppInfo(..), PkgInfo(..))
+import qualified Json.Encode as Encode
 
 import qualified Deps.Explorer as Explorer
 import qualified Deps.Get as Get
@@ -312,9 +312,10 @@ updateCache root name info solution results =
               let resultList = Map.elems results
               let objs = Obj.unions (map Compiler._objs resultList)
               IO.writeBinary (root </> "objs.dat") objs
-              liftIO $ do
-                let docs = Maybe.mapMaybe Compiler._docs resultList
-                BS.writeFile (root </> "documentation.json") (Docs.prettyJson docs)
+
+              let docs = Maybe.mapMaybe Compiler._docs resultList
+              let json = Encode.list Docs.encode docs
+              liftIO $ Encode.write (root </> "documentation.json") json
 
       return ifaces
 
