@@ -1,59 +1,10 @@
 {-# OPTIONS_GHC -Wall #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
-module Generate.BoilerPlate
-  ( appHeader
-  , appFooter
-  , functions
-  )
-  where
-
+module Generate.Functions (functions) where
 
 import qualified Data.ByteString.Builder as BS
-import Text.RawString.QQ
-
-
-
--- HEADER
-
-
-appHeader :: BS.Builder
-appHeader =
-  "(function(){"
-
-
-appFooter :: BS.Builder
-appFooter = [r|
-if (typeof define === "function" && define['amd'])
-{
-  define([], function() { return Elm; });
-  return;
-}
-
-if (typeof module === "object")
-{
-  module['exports'] = Elm;
-  return;
-}
-
-var globalElm = this['Elm'];
-if (typeof globalElm === "undefined")
-{
-  this['Elm'] = Elm;
-  return;
-}
-
-for (var publicModule in Elm)
-{
-  if (publicModule in globalElm)
-  {
-    throw new Error('There are two Elm modules called `' + publicModule + '` on this page! Rename one of them.');
-  }
-  globalElm[publicModule] = Elm[publicModule];
-}
-
-}).call(this);
-|]
+import Text.RawString.QQ (r)
 
 
 
@@ -157,4 +108,3 @@ function A9(fun, a, b, c, d, e, f, g, h, i) {
 }
 
 |]
-
