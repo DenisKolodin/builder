@@ -1,8 +1,8 @@
 {-# OPTIONS_GHC -Wall #-}
 module File.Args
   ( Args(..)
-  , pathsToArgs
-  , summaryToArgs
+  , fromPaths
+  , fromSummary
   )
   where
 
@@ -21,18 +21,18 @@ data Args roots
   | Roots (NonEmpty roots)
 
 
-pathsToArgs :: Summary.Summary -> [FilePath] -> Task.Task (Args FilePath)
-pathsToArgs summary paths =
+fromPaths :: Summary.Summary -> [FilePath] -> Task.Task (Args FilePath)
+fromPaths summary paths =
   case paths of
     [] ->
-      summaryToArgs summary
+      fromSummary summary
 
     first : rest ->
       return $ Roots (first :| rest)
 
 
-summaryToArgs :: Summary.Summary -> Task.Task (Args a)
-summaryToArgs (Summary.Summary _ project _ _ _) =
+fromSummary :: Summary.Summary -> Task.Task (Args a)
+fromSummary (Summary.Summary _ project _ _ _) =
   case project of
     Project.Pkg info ->
       return $ Pkg (Project._pkg_exposed info)

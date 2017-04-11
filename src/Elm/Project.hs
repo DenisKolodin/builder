@@ -45,9 +45,10 @@ getRootWithReplFallback =
 -- COMPILE
 
 
-compile :: Summary -> Args.Args FilePath -> Task.Task ()
-compile summary args =
-  do  graph <- Crawl.crawl summary args
+compile :: Summary -> [FilePath] -> Task.Task ()
+compile summary paths =
+  do  args <- Args.fromPaths summary paths
+      graph <- Crawl.crawl summary args
       (dirty, ifaces) <- Plan.plan summary graph
       let project = Summary._project summary
       answers <- Compile.compile project ifaces dirty
