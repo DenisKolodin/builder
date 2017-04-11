@@ -79,7 +79,7 @@ compileModule tell project answersMVar ifacesMVar name info =
               else
                 do  tell (Progress.CompileFileStart name)
                     let pkg = Project.getName project
-                    let isExposed = elem name (Project.getRoots project)
+                    let isExposed = Project.isPackageRoot name project
                     let imports = makeImports project info
                     ifaces <- readMVar ifacesMVar
                     let context = Compiler.Context pkg isExposed imports ifaces

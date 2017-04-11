@@ -12,6 +12,8 @@ import Control.Concurrent.Chan (Chan, newChan, readChan)
 import Control.Monad (foldM)
 import Control.Monad.Except (liftIO)
 import qualified Data.Graph as Graph
+import qualified Data.List.NonEmpty as NonEmpty
+import Data.List.NonEmpty (NonEmpty((:|)))
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 import Data.Text (Text)
@@ -23,78 +25,80 @@ import qualified Elm.Package as Pkg
 import qualified Elm.Project.Json as Project
 import Elm.Project.Json (Project)
 import Elm.Project.Summary (Summary(..))
+import qualified File.Args as Args
 import qualified File.Find as Find
 import qualified File.IO as IO
+import qualified Generate.Plan as Plan
 import qualified Reporting.Error as Error
 import qualified Reporting.Error.Crawl as E
 import qualified Reporting.Task as Task
 
 
 
--- GRAPH
+-- CRAWL
 
 
-data Graph problems =
-  Graph
-    { _locals :: Map.Map Module.Raw Info
-    , _natives :: Map.Map Module.Raw FilePath
-    , _foreigns :: Map.Map Module.Raw Pkg.Package
-    , _problems :: problems
-    }
+crawl :: Summary -> Args.Args FilePath -> Task.Task (Graph ())
+crawl summary args =
+  case args of
+    Args.Pkg names ->
+      do  let roots = map (Unvisited Nothing) names
+          let graph = freshGraph (Args.Pkg names) Map.empty
+          dfs summary roots graph
+
+    Args.App plan@(Plan.Plan cache pages _ _ _) ->
+      do  let names = cache : map Plan._elm pages
+          let roots = map (Unvisited Nothing) names
+          let graph = freshGraph (Args.App plan) Map.empty
+          dfs summary roots graph
+
+    Args.Roots (path :| []) ->
+      crawlHelp summary =<< readFileHeader1 summary path
+
+    Args.Roots paths ->
+      do  headers <- traverse (readFileHeaderN summary) paths
+          let names = NonEmpty.map fst headers
+          let roots = map (Unvisited Nothing) (NonEmpty.toList names)
+          let graph = freshGraph (Args.Roots names) (Map.fromList (NonEmpty.toList headers))
+          dfs summary roots graph
 
 
-data Info =
-  Info
-    { _path :: FilePath
-    , _source :: Text
-    , _imports :: [Module.Raw]
-    }
+crawlFromSource :: Summary -> FilePath -> Text -> Task.Task (Graph ())
+crawlFromSource summary@(Summary _ project _ _ _) fakePath source =
+  crawlHelp summary =<<
+    atRoot (parseHeader project fakePath source)
 
 
-
--- CRAWL PROJECT
-
-
-crawl :: Summary -> Task.Task (Graph ())
-crawl summary@(Summary _ project _ _ _) =
-  do  let unvisited = map (Unvisited Nothing) (Project.getRoots project)
-      graph <- dfs summary unvisited
-      checkForCycles graph
-      return graph
+crawlHelp :: Summary -> ( Maybe Module.Raw, Info ) -> Task.Task (Graph ())
+crawlHelp summary ( maybeName, info@(Info _ _ deps) ) =
+  do  let name = maybe "Main" id maybeName
+      let args = Args.Roots (name :| [])
+      let roots = map (Unvisited maybeName) deps
+      let graph = freshGraph args (Map.singleton name info)
+      dfs summary roots graph
 
 
-crawlFromSource :: Summary -> FilePath -> Text -> Task.Task (Module.Raw, Graph ())
-crawlFromSource summary@(Summary _ project _ _ _) path source =
-  do  (maybeName, deps) <-
-        Task.mapError Error.BadCrawlRoot (parseHeader project path source)
-      let name = maybe "Main" id maybeName
-      subGraph <- dfs summary (map (Unvisited maybeName) deps)
-      let graph = addLocal name (Info path source deps) subGraph
-      checkForCycles graph
-      return (name, graph)
+atRoot :: CTask a -> Task.Task a
+atRoot task =
+  Task.mapError Error.BadCrawlRoot task
 
 
 
 -- DEPTH FIRST SEARCH
 
 
-dfs :: Summary -> [Unvisited] -> Task.Task (Graph ())
-dfs summary unvisited =
+dfs :: Summary -> [Unvisited] -> WorkGraph -> Task.Task (Graph ())
+dfs summary unvisited startGraph =
   do  chan <- liftIO newChan
 
-      graph <- dfsHelp summary chan 0 Set.empty unvisited emptyGraph
+      graph <- dfsHelp summary chan 0 Set.empty unvisited startGraph
 
       if Map.null (_problems graph)
-        then return (graph { _problems = () })
-        else Task.throw (Error.BadCrawl (_problems graph))
-
-
-type WorkGraph = Graph (Map.Map Module.Raw E.Error)
-
-
-emptyGraph :: WorkGraph
-emptyGraph =
-  Graph Map.empty Map.empty Map.empty Map.empty
+        then
+          do  checkForCycles graph
+              return (graph { _problems = () })
+        else
+          Task.throw (Error.BadCrawl (_problems graph))
 
 
 type FileResult = Either (Module.Raw, E.Error) Asset
@@ -111,13 +115,13 @@ dfsHelp summary chan oldPending oldSeen unvisited graph =
           do  asset <- liftIO $ readChan chan
               case asset of
                 Right (Local name info) ->
-                  do  let newGraph = addLocal name info graph
+                  do  let newGraph = graph { _locals = Map.insert name info (_locals graph) }
                       let deps = map (Unvisited (Just name)) (_imports info)
                       dfsHelp summary chan (pending - 1) seen deps newGraph
 
                 Right (Kernel name path) ->
-                  do  let natives = Map.insert name path (_natives graph)
-                      let newGraph = graph { _natives = natives }
+                  do  let kernels = Map.insert name path (_kernels graph)
+                      let newGraph = graph { _kernels = kernels }
                       dfsHelp summary chan (pending - 1) seen [] newGraph
 
                 Right (Foreign name pkg) ->
@@ -129,11 +133,6 @@ dfsHelp summary chan oldPending oldSeen unvisited graph =
                   do  let problems = Map.insert name err (_problems graph)
                       let newGraph = graph { _problems = problems }
                       dfsHelp summary chan (pending - 1) seen [] newGraph
-
-
-addLocal :: Module.Raw -> Info -> Graph a -> Graph a
-addLocal name info graph =
-  graph { _locals = Map.insert name info (_locals graph) }
 
 
 crawlNew
@@ -148,6 +147,36 @@ crawlNew summary chan (seen, n) unvisited@(Unvisited _ name) =
   else
     do  Task.workerChan chan (crawlFile summary unvisited)
         return (Set.insert name seen, n + 1)
+
+
+
+-- DFS STATE
+
+
+data Graph problems =
+  Graph
+    { _args :: Args.Args Module.Raw
+    , _locals :: Map.Map Module.Raw Info
+    , _kernels :: Map.Map Module.Raw FilePath
+    , _foreigns :: Map.Map Module.Raw Pkg.Package
+    , _problems :: problems
+    }
+
+
+data Info =
+  Info
+    { _path :: FilePath
+    , _source :: Text
+    , _imports :: [Module.Raw]
+    }
+
+
+type WorkGraph = Graph (Map.Map Module.Raw E.Error)
+
+
+freshGraph :: Args.Args Module.Raw -> Map.Map Module.Raw Info -> WorkGraph
+freshGraph args locals =
+  Graph args locals Map.empty Map.empty Map.empty
 
 
 
@@ -186,30 +215,48 @@ crawlFile summary (Unvisited maybeParent name) =
 -- READ HEADER
 
 
-type ATask a = Task.Task_ E.Error a
+type CTask a = Task.Task_ E.Error a
 
 
-readModuleHeader :: Summary -> Module.Raw -> FilePath -> ATask Asset
+readModuleHeader :: Summary -> Module.Raw -> FilePath -> CTask Asset
 readModuleHeader summary expectedName path =
   do  source <- liftIO (IO.readUtf8 path)
-      (maybeName, deps) <- parseHeader (_project summary) path source
+      (maybeName, info) <- parseHeader (_project summary) path source
       name <- checkName path expectedName maybeName
-      return (Local name (Info path source deps))
+      return (Local name info)
+
+
+readFileHeader1 :: Summary -> FilePath -> Task.Task (Maybe Module.Raw, Info)
+readFileHeader1 summary path =
+  do  source <- liftIO (IO.readUtf8 path)
+      atRoot $ parseHeader (_project summary) path source
+
+
+readFileHeaderN :: Summary -> FilePath -> Task.Task (Module.Raw, Info)
+readFileHeaderN summary path =
+  do  source <- liftIO (IO.readUtf8 path)
+      (maybeName, info) <- atRoot $ parseHeader (_project summary) path source
+      case maybeName of
+        Nothing ->
+          error ("TODO module at " ++ path ++ " needs a name")
+
+        Just name ->
+          return (name, info)
 
 
 -- TODO get regions on data extracted here
-parseHeader :: Project -> FilePath -> Text -> ATask (Maybe Module.Raw, [Module.Raw])
+parseHeader :: Project -> FilePath -> Text -> CTask (Maybe Module.Raw, Info)
 parseHeader project path source =
   case Compiler.parseDependencies (Project.getName project) source of
     Right (tag, maybeName, deps) ->
       do  checkTag project path tag
-          return (maybeName, deps)
+          return ( maybeName, Info path source deps )
 
     Left msg ->
       Task.throw (E.BadHeader path msg)
 
 
-checkName :: FilePath -> Module.Raw -> Maybe Module.Raw -> ATask Module.Raw
+checkName :: FilePath -> Module.Raw -> Maybe Module.Raw -> CTask Module.Raw
 checkName path expectedName maybeName =
   case maybeName of
     Nothing ->
@@ -221,7 +268,7 @@ checkName path expectedName maybeName =
         else Task.throw (E.BadName path actualName)
 
 
-checkTag :: Project -> FilePath -> Compiler.Tag -> ATask ()
+checkTag :: Project -> FilePath -> Compiler.Tag -> CTask ()
 checkTag project path tag =
   case tag of
     Compiler.Normal ->
@@ -248,7 +295,7 @@ checkTag project path tag =
 
 
 checkForCycles :: Graph a -> Task.Task ()
-checkForCycles (Graph locals _ _ _) =
+checkForCycles (Graph _ locals _ _ _) =
   let
     toNode (name, info) =
       (name, name, _imports info)

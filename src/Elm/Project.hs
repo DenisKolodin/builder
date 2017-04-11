@@ -18,6 +18,7 @@ import qualified Elm.Compiler.Module as Module
 import qualified Elm.Project.Root as Root
 import qualified Elm.Project.Summary as Summary
 import Elm.Project.Summary (Summary)
+import qualified File.Args as Args
 import qualified File.Artifacts as Artifacts
 import qualified File.Compile as Compile
 import qualified File.Crawl as Crawl
@@ -44,19 +45,19 @@ getRootWithReplFallback =
 -- COMPILE
 
 
-compile :: Summary -> Task.Task ()
-compile summary =
-  do  graph <- Crawl.crawl summary
+compile :: Summary -> Args.Args FilePath -> Task.Task ()
+compile summary args =
+  do  graph <- Crawl.crawl summary args
       (dirty, ifaces) <- Plan.plan summary graph
       let project = Summary._project summary
       answers <- Compile.compile project ifaces dirty
       results <- Artifacts.write answers
-      Output.generate summary graph "Main"
+      Output.generate summary graph
 
 
 compileSource :: Summary -> FilePath -> Text -> Task.Task (Map Module.Raw Compiler.Result)
 compileSource summary path source =
-  do  (name, graph) <- Crawl.crawlFromSource summary path source
+  do  graph <- Crawl.crawlFromSource summary path source
       (dirty, ifaces) <- Plan.plan summary graph
       let project = Summary._project summary
       answers <- Compile.compile project ifaces dirty

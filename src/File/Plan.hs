@@ -35,7 +35,7 @@ type Dict value = Map.Map Module.Raw value
 
 
 plan :: Summary.Summary -> Crawl.Graph () -> Task.Task (Dict Info, Module.Interfaces)
-plan (Summary.Summary root project _ ifaces _) (Crawl.Graph locals _ foreigns _) =
+plan (Summary.Summary root project _ ifaces _) (Crawl.Graph _ locals _ foreigns _) =
   liftIO $
   do  queue <- newChan
       let env = Env queue root (Project.getName project)
@@ -74,7 +74,7 @@ data Info =
     , _src :: Text.Text
     , _clean :: [Module.Raw]
     , _dirty :: [Module.Raw]
-    , _foreign :: [Module.Canonical]
+    , _foreign :: [Module.Canonical]  -- TODO is this needed?
     }
 
 

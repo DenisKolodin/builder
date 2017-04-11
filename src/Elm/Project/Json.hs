@@ -15,11 +15,11 @@ module Elm.Project.Json
   -- queries
   , appSolution
   , isKernel
+  , isPackageRoot
   , get
   , getName
   , getSourceDirs
   , getEffect
-  , getRoots
   )
   where
 
@@ -146,6 +146,16 @@ isKernel project =
         user == "elm-lang" || user == "elm-exploration"
 
 
+isPackageRoot :: Module.Raw -> Project -> Bool
+isPackageRoot name project =
+  case project of
+    App _ _ ->
+      False
+
+    Pkg info ->
+      elem name (_pkg_exposed info)
+
+
 get :: (AppInfo -> a) -> (PkgInfo -> a) -> Project -> a
 get appFunc pkgFunc project =
   case project of
@@ -169,19 +179,6 @@ getSourceDirs project =
 getEffect :: Project -> Bool
 getEffect project =
   get (const False) _pkg_effects project
-
-
-getRoots :: Project -> [Module.Raw]
-getRoots project =
-  case project of
-    Pkg info ->
-      _pkg_exposed info
-
-    App _ Nothing ->
-      []
-
-    App _ (Just plan) ->
-      map Plan._elm (Plan._pages plan)
 
 
 
