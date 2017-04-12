@@ -62,13 +62,11 @@ generateMonolith summary@(Summary.Summary _ project _ _ deps) graph names =
       let (natives, builder) = Compiler.generate table objectGraph (Obj.mains roots)
 
       cacheDir <- Task.getPackageCacheDir
-      hash <- liftIO $ Hash.put "temp.js" $
-        do  Hash.putBuilder App.header
-            mapM_ (Hash.putFile . pathTo cacheDir deps) natives
-            Hash.putBuilder builder
-            Hash.putBuilder (App.footer Nothing roots)
-
-      liftIO $ Dir.renameFile "temp.js" (Hash.toString hash ++ ".js")
+      liftIO $ IO.put "elm.js" $
+        do  IO.putBuilder App.header
+            mapM_ (IO.putFile . pathTo cacheDir deps) natives
+            IO.putBuilder builder
+            IO.putBuilder (App.footer Nothing roots)
 
 
 

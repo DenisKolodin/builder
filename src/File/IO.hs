@@ -2,15 +2,24 @@ module File.IO
   ( writeBinary, readBinary
   , writeUtf8, readUtf8
   , writeBuilder
+  , Writer
+  , put
+  , putByteString
+  , putBuilder
+  , putFile
   , remove, exists
   , removeDir
   , andM
   )
   where
 
-import Control.Monad.Except (liftIO)
+import qualified Control.Monad.Reader as Reader
+import Control.Monad.Trans (liftIO)
 import qualified Data.Binary as Binary
+import qualified Data.ByteString as BS
 import qualified Data.ByteString.Builder as BS
+import qualified Data.ByteString.Builder.Extra as BS (defaultChunkSize)
+import qualified Data.ByteString.Lazy as LBS
 import qualified Data.Text as Text
 import qualified Data.Text.IO as TextIO
 import GHC.IO.Exception ( IOErrorType(InvalidArgument) )
@@ -108,6 +117,46 @@ writeBuilder path builder =
   IO.withBinaryFile path IO.WriteMode $ \handle ->
     do  IO.hSetBuffering handle (IO.BlockBuffering Nothing)
         BS.hPutBuilder handle builder
+
+
+
+-- WRITER
+
+
+type Writer = Reader.ReaderT IO.Handle IO ()
+
+
+put :: FilePath -> Writer -> IO ()
+put path writer =
+  IO.withBinaryFile path IO.WriteMode (Reader.runReaderT writer)
+
+
+putByteString :: BS.ByteString -> Writer
+putByteString chunk =
+  do  handle <- Reader.ask
+      liftIO $ BS.hPut handle chunk
+
+
+putBuilder :: BS.Builder -> Writer
+putBuilder builder =
+  do  handle <- Reader.ask
+      liftIO $ mapM_ (BS.hPut handle) $
+        LBS.toChunks (BS.toLazyByteString builder)
+
+
+putFile :: FilePath -> Writer
+putFile path =
+  do  sink <- Reader.ask
+      liftIO $ IO.withBinaryFile path IO.ReadMode $ \source ->
+        putHelp source sink
+
+
+putHelp :: IO.Handle -> IO.Handle -> IO ()
+putHelp source sink =
+  do  chunk <- BS.hGet source BS.defaultChunkSize
+      if BS.null chunk then return () else
+        do  BS.hPut sink chunk
+            putHelp source sink
 
 
 
