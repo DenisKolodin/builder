@@ -4,6 +4,7 @@ module Stuff.Paths
   , removeStuff
   , elmi
   , elmo
+  , temp
   )
   where
 
@@ -70,3 +71,11 @@ toArtifactPath :: Module.Raw -> String -> FilePath
 toArtifactPath name ext =
   stuff </> Text.unpack (Module.hyphenate name) <.> ext
 
+
+
+-- TEMP
+
+
+temp :: FilePath
+temp =
+  stuff </> "temp.js"

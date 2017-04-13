@@ -14,7 +14,8 @@ import Control.Monad.Except (liftIO)
 import qualified Data.Binary as Binary
 import qualified Data.Map as Map
 import qualified Data.Text as Text
-import System.Directory (doesFileExist, getModificationTime, removeFile)
+import qualified Data.Time.Clock as Time
+import qualified System.Directory as Dir
 import System.FilePath ((</>))
 
 import qualified Elm.Compiler.Module as Module
@@ -89,7 +90,7 @@ getStatus
   -> Module.Raw
   -> Crawl.Info
   -> IO (MVar Status)
-getStatus env statusMVars foreigns name (Crawl.Info path src deps) =
+getStatus env statusMVars foreigns name (Crawl.Info path time src deps) =
   do  mvar <- newEmptyMVar
 
       void $ forkIO $ putMVar mvar =<<
@@ -104,7 +105,7 @@ getStatus env statusMVars foreigns name (Crawl.Info path src deps) =
                     return (Just info)
 
               [] ->
-                do  fresh <- isFresh path elmi
+                do  fresh <- isFresh time elmi
                     if fresh
                       then
                         do  let canonical = Module.Canonical (_pkg env) name
@@ -142,12 +143,11 @@ addDep locals foreigns info name =
 -- IS FRESH
 
 
-isFresh :: FilePath -> FilePath -> IO Bool
-isFresh path elmi =
+isFresh :: Time.UTCTime -> FilePath -> IO Bool
+isFresh srcTime elmi =
   andM
-    [ doesFileExist elmi
-    , do  elmiTime <- getModificationTime elmi
-          srcTime <- getModificationTime path
+    [ Dir.doesFileExist elmi
+    , do  elmiTime <- Dir.getModificationTime elmi
           return (elmiTime >= srcTime)
     ]
 
@@ -165,8 +165,8 @@ andM checks =
 
 remove :: FilePath -> IO ()
 remove path =
-  do  exists <- doesFileExist path
-      when exists (removeFile path)
+  do  exists <- Dir.doesFileExist path
+      when exists (Dir.removeFile path)
 
 
 

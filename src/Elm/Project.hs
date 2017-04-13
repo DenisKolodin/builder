@@ -4,16 +4,12 @@ module Elm.Project
   ( getRoot
   , getRootWithReplFallback
   , compile
-  , compileSource
+  , compileForRepl
   )
   where
 
 
-import Data.Map (Map)
 import Data.Text (Text)
-
-import qualified Elm.Compiler as Compiler
-import qualified Elm.Compiler.Module as Module
 
 import qualified Elm.Project.Root as Root
 import qualified Elm.Project.Summary as Summary
@@ -24,6 +20,7 @@ import qualified File.Compile as Compile
 import qualified File.Crawl as Crawl
 import qualified File.Plan as Plan
 import qualified Generate.Output as Output
+import qualified Generate.Repl as Repl
 import qualified Reporting.Task as Task
 
 
@@ -56,13 +53,23 @@ compile summary paths =
       Output.generate summary graph
 
 
-compileSource :: Summary -> FilePath -> Text -> Task.Task (Map Module.Raw Compiler.Result)
-compileSource summary path source =
-  do  graph <- Crawl.crawlFromSource summary path source
+
+-- COMPILE FOR REPL
+
+
+compileForRepl :: Text -> Maybe String -> Task.Task (Maybe FilePath)
+compileForRepl source maybeName =
+  do  summary <- getRoot
+      graph <- Crawl.crawlFromSource summary "REPL" source
       (dirty, ifaces) <- Plan.plan summary graph
       let project = Summary._project summary
       answers <- Compile.compile project ifaces dirty
       results <- Artifacts.write answers
-      -- TODO generate JS in one (big?) bundle
-      -- TODO perhaps it can be cut up for elm-lang.org?
-      return results
+      case maybeName of
+        Nothing ->
+          return Nothing
+
+        Just name ->
+          do  let output = Repl.toOutput results name
+              path <- Output.generateReplFile summary graph output
+              return (Just path)

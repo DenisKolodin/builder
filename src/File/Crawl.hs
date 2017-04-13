@@ -17,6 +17,9 @@ import Data.List.NonEmpty (NonEmpty((:|)))
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 import Data.Text (Text)
+import qualified Data.Time.Calendar as Day
+import qualified Data.Time.Clock as Time
+import qualified System.Directory as Dir
 
 import qualified Elm.Compiler as Compiler
 import qualified Elm.Compiler.Module as Module
@@ -66,11 +69,16 @@ crawl summary args =
 crawlFromSource :: Summary -> FilePath -> Text -> Task.Task (Graph ())
 crawlFromSource summary@(Summary _ project _ _ _) fakePath source =
   crawlHelp summary =<<
-    atRoot (parseHeader project fakePath source)
+    atRoot (parseHeader project fakePath fakeTime source)
+
+
+fakeTime :: Time.UTCTime
+fakeTime =
+  Time.UTCTime (Day.fromGregorian 2990 2 2) 0
 
 
 crawlHelp :: Summary -> ( Maybe Module.Raw, Info ) -> Task.Task (Graph ())
-crawlHelp summary ( maybeName, info@(Info _ _ deps) ) =
+crawlHelp summary ( maybeName, info@(Info _ _ _ deps) ) =
   do  let name = maybe "Main" id maybeName
       let args = Args.Roots (name :| [])
       let roots = map (Unvisited maybeName) deps
@@ -166,6 +174,7 @@ data Graph problems =
 data Info =
   Info
     { _path :: FilePath
+    , _time :: Time.UTCTime
     , _source :: Text
     , _imports :: [Module.Raw]
     }
@@ -220,22 +229,25 @@ type CTask a = Task.Task_ E.Error a
 
 readModuleHeader :: Summary -> Module.Raw -> FilePath -> CTask Asset
 readModuleHeader summary expectedName path =
-  do  source <- liftIO (IO.readUtf8 path)
-      (maybeName, info) <- parseHeader (_project summary) path source
+  do  time <- liftIO $ Dir.getModificationTime path
+      source <- liftIO $ IO.readUtf8 path
+      (maybeName, info) <- parseHeader (_project summary) path time source
       name <- checkName path expectedName maybeName
       return (Local name info)
 
 
 readFileHeader1 :: Summary -> FilePath -> Task.Task (Maybe Module.Raw, Info)
 readFileHeader1 summary path =
-  do  source <- liftIO (IO.readUtf8 path)
-      atRoot $ parseHeader (_project summary) path source
+  do  time <- liftIO $ Dir.getModificationTime path
+      source <- liftIO $ IO.readUtf8 path
+      atRoot $ parseHeader (_project summary) path time source
 
 
 readFileHeaderN :: Summary -> FilePath -> Task.Task (Module.Raw, Info)
 readFileHeaderN summary path =
-  do  source <- liftIO (IO.readUtf8 path)
-      (maybeName, info) <- atRoot $ parseHeader (_project summary) path source
+  do  time <- liftIO $ Dir.getModificationTime path
+      source <- liftIO $ IO.readUtf8 path
+      (maybeName, info) <- atRoot $ parseHeader (_project summary) path time source
       case maybeName of
         Nothing ->
           error ("TODO module at " ++ path ++ " needs a name")
@@ -245,12 +257,12 @@ readFileHeaderN summary path =
 
 
 -- TODO get regions on data extracted here
-parseHeader :: Project -> FilePath -> Text -> CTask (Maybe Module.Raw, Info)
-parseHeader project path source =
+parseHeader :: Project -> FilePath -> Time.UTCTime -> Text -> CTask (Maybe Module.Raw, Info)
+parseHeader project path time source =
   case Compiler.parseDependencies (Project.getName project) source of
     Right (tag, maybeName, deps) ->
       do  checkTag project path tag
-          return ( maybeName, Info path source deps )
+          return ( maybeName, Info path time source deps )
 
     Left msg ->
       Task.throw (E.BadHeader path msg)

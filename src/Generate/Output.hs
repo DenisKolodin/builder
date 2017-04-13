@@ -1,8 +1,8 @@
 {-# OPTIONS_GHC -Wall #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE QuasiQuotes #-}
 module Generate.Output
   ( generate
+  , generateReplFile
   )
   where
 
@@ -11,7 +11,6 @@ import Control.Monad.Trans (liftIO)
 import qualified Data.List.NonEmpty as NonEmpty
 import qualified Data.Map as Map
 import Data.Map ((!))
-import qualified System.Directory as Dir
 import System.FilePath ((</>), (<.>))
 
 import qualified Elm.Compiler as Compiler
@@ -23,10 +22,10 @@ import qualified Elm.Project.Json as Project
 import qualified Elm.Project.Summary as Summary
 import qualified File.Args as Args
 import qualified File.Crawl as Crawl
-import qualified File.Hash as Hash
 import qualified File.IO as IO
 import qualified Generate.App as App
 import qualified Generate.Plan as Plan
+import qualified Generate.Repl as Repl
 import qualified Reporting.Task as Task
 import qualified Stuff.Paths as Paths
 
@@ -67,6 +66,29 @@ generateMonolith summary@(Summary.Summary _ project _ _ deps) graph names =
             mapM_ (IO.putFile . pathTo cacheDir deps) natives
             IO.putBuilder builder
             IO.putBuilder (App.footer Nothing roots)
+
+
+
+-- GENERATE REPL MONOLITH
+
+
+generateReplFile :: Summary.Summary -> Crawl.Graph () -> Repl.Output -> Task.Task FilePath
+generateReplFile summary@(Summary.Summary _ project _ _ deps) graph output =
+  do
+      objectGraph <- organize summary graph
+      let pkg = Project.getName project
+      let roots = Repl.toRoots pkg output
+      let table = Obj.symbolTable Map.empty
+      let (natives, builder) = Compiler.generate table objectGraph roots
+
+      cacheDir <- Task.getPackageCacheDir
+      liftIO $ IO.put Paths.temp $
+        do  IO.putBuilder Repl.header
+            mapM_ (IO.putFile . pathTo cacheDir deps) natives
+            IO.putBuilder builder
+            IO.putBuilder (Repl.footer pkg output)
+
+      return Paths.temp
 
 
 
