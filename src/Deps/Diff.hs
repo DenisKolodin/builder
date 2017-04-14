@@ -1,5 +1,6 @@
+{-# OPTIONS_GHC -Wall #-}
 {-# LANGUAGE OverloadedStrings #-}
-module Diff.Compare
+module Deps.Diff
   ( bumpBy
   , computeChanges
   , Changes(..)
@@ -7,6 +8,7 @@ module Diff.Compare
   , ModuleChanges(..), moduleChangeMagnitude
   )
   where
+
 
 import Control.Monad (zipWithM)
 import Data.Function (on)
