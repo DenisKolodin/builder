@@ -74,7 +74,7 @@ footer (Pkg.Name user project) (Output name tipe) =
       utf8 user <> "$" <> utf8 project <> "$ElmRepl$" <> BS.stringUtf8 name
 
     typeString =
-      BS.stringUtf8 (show (Type.toString tipe))
+      BS.stringUtf8 (show (Type.toString Type.MultiLine tipe))
   in
     "var _value = " <> jsName <> "_as_string_for_repl;\n" <>
     "var _type = " <> typeString <> ";\n" <>
