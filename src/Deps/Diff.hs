@@ -3,6 +3,7 @@
 module Deps.Diff
   ( diff
   , PackageChanges
+  , toString
   , bump
   )
   where
@@ -15,6 +16,8 @@ import qualified Data.Map as Map
 import qualified Data.Set as Set
 import qualified Data.Text as Text
 import Data.Text (Text)
+import Text.PrettyPrint ((<+>), (<>))
+import qualified Text.PrettyPrint as P
 
 import qualified Elm.Compiler.Module as Module
 import qualified Elm.Compiler.Type as Type
@@ -287,7 +290,7 @@ data Magnitude
   = PATCH
   | MINOR
   | MAJOR
-  deriving (Eq, Ord)
+  deriving (Eq, Ord, Show)
 
 
 bump :: PackageChanges -> Pkg.Version -> Pkg.Version
@@ -332,3 +335,143 @@ changeMagnitude (Changes added changed removed) =
 
   else
     PATCH
+
+
+
+-- TO STRING
+
+
+toString :: PackageChanges -> String
+toString changes@(PackageChanges added changed removed) =
+  concat
+    [ "This is a " ++ show (packageChangeMagnitude changes) ++ " change.\n\n"
+    ,
+      if null added then
+        ""
+      else
+        header "Added modules - MINOR" ++ "\n"
+        ++ concatMap ((++) "\n    " . Module.nameToString) added
+        ++ "\n\n\n"
+    ,
+      if null removed then
+        ""
+      else
+        header "Removed modules - MAJOR" ++ "\n"
+        ++ concatMap ((++) "\n    " . Module.nameToString) removed
+        ++ "\n\n\n"
+    ,
+      concatMap changesToString (Map.toList changed)
+    ]
+
+
+header :: String -> String
+header title =
+  let
+    len =
+      length title
+  in
+    "------ " ++ title ++ " " ++ replicate (80 - len - 8) '-'
+
+
+changesToString :: (Text, ModuleChanges) -> String
+changesToString (name, changes@(ModuleChanges unions aliases values)) =
+  let
+    magnitude =
+      moduleChangeMagnitude changes
+
+    (unionAdd, unionChange, unionRemove) =
+      changesToDocs unionToDoc unions
+
+    (aliasAdd, aliasChange, aliasRemove) =
+      changesToDocs aliasToDoc aliases
+
+    (valueAdd, valueChange, valueRemove) =
+      changesToDocs valueToDoc values
+  in
+    header ("Changes to module " ++ Text.unpack name ++ " - " ++ show magnitude)
+    ++ changesToStringHelp "Added" unionAdd aliasAdd valueAdd
+    ++ changesToStringHelp "Removed" unionRemove aliasRemove valueRemove
+    ++ changesToStringHelp "Changed" unionChange aliasChange valueChange
+    ++ "\n\n\n"
+
+
+changesToDocs :: (k -> v -> P.Doc) -> Changes k v -> ([P.Doc], [P.Doc], [P.Doc])
+changesToDocs toDoc (Changes added changed removed) =
+  let
+    indented (name, value) =
+      P.text "        " <> toDoc name value
+
+    diffed (name, (oldValue, newValue)) =
+      P.vcat
+        [ P.text "      - " <> toDoc name oldValue
+        , P.text "      + " <> toDoc name newValue
+        , P.text ""
+        ]
+  in
+    ( map indented (Map.toList added)
+    , map diffed   (Map.toList changed)
+    , map indented (Map.toList removed)
+    )
+
+
+changesToStringHelp :: String -> [P.Doc] -> [P.Doc] -> [P.Doc] -> String
+changesToStringHelp categoryName unions aliases values =
+  if null unions && null aliases && null values then
+    ""
+
+  else
+    P.renderStyle (P.Style P.PageMode 80 1.0) $ P.vcat $
+      [ P.text ""
+      , P.text ""
+      , P.text ("    " ++ categoryName ++ ":")
+      ]
+      ++ unions
+      ++ aliases
+      ++ values
+
+
+unionToDoc :: Text -> Docs.Union -> P.Doc
+unionToDoc name (Docs.Union tvars ctors) =
+  let
+    setup =
+      P.text "type" <+> text name <+> P.hsep (map text tvars)
+
+    separators =
+      map P.text ("=" : repeat "|")
+
+    ctorDoc (ctor, tipes) =
+      typeDoc (Type.App (Type.Type ctor) tipes)
+  in
+    P.hang setup 4 (P.sep (zipWith (<+>) separators (map ctorDoc ctors)))
+
+
+aliasToDoc :: Text -> Docs.Alias -> P.Doc
+aliasToDoc name (Docs.Alias tvars tipe) =
+  let
+    typeAlias =
+      P.text "type" <+> P.text "alias"
+
+    declaration =
+      typeAlias <+> text name <+> P.hsep (map text tvars) <+> P.equals
+  in
+    P.hang declaration 4 (typeDoc tipe)
+
+
+valueToDoc :: Text -> Docs.Value Type.Type -> P.Doc
+valueToDoc name value =
+  case value of
+    Docs.Value tipe ->
+      text name <+> P.colon <+> typeDoc tipe
+
+    Docs.Infix tipe _ _ ->
+      P.text "(" <> text name <> P.text ")" <+> P.colon <+> typeDoc tipe
+
+
+typeDoc :: Type.Type -> P.Doc
+typeDoc tipe =
+  P.text (Type.toString Type.OneLine tipe)
+
+
+text :: Text -> P.Doc
+text txt =
+  P.text (Text.unpack txt)
