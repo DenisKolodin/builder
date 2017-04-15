@@ -50,6 +50,7 @@ Library
         Reporting.Task
 
     other-modules:
+        Deps.Diff,
         Deps.Explorer,
         Deps.Get,
         Deps.Solver.Internal,

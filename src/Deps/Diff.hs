@@ -1,11 +1,9 @@
 {-# OPTIONS_GHC -Wall #-}
 {-# LANGUAGE OverloadedStrings #-}
 module Deps.Diff
-  ( bumpBy
-  , computeChanges
-  , Changes(..)
-  , PackageChanges(..), packageChangeMagnitude
-  , ModuleChanges(..), moduleChangeMagnitude
+  ( diff
+  , PackageChanges
+  , bump
   )
   where
 
@@ -18,297 +16,195 @@ import qualified Data.Set as Set
 import qualified Data.Text as Text
 import Data.Text (Text)
 
-import qualified Catalog
-import Diff.Magnitude (Magnitude(..))
 import qualified Elm.Compiler.Module as Module
 import qualified Elm.Compiler.Type as Type
 import qualified Elm.Docs as Docs
-import qualified Elm.Package as Package
-import qualified Manager
+import qualified Elm.Package as Pkg
 
 
 
-computeChanges
-    :: [Docs.Documentation]
-    -> Package.Name
-    -> Package.Version
-    -> Manager.Manager PackageChanges
-computeChanges newDocs name version =
-  do  oldDocs <- Catalog.documentation name version
-      return (diffPackages oldDocs newDocs)
-
-
-
--- CHANGE MAGNITUDE
-
-
-bumpBy :: PackageChanges -> Package.Version -> Package.Version
-bumpBy changes version =
-  case packageChangeMagnitude changes of
-    PATCH ->
-        Package.bumpPatch version
-
-    MINOR ->
-        Package.bumpMinor version
-
-    MAJOR ->
-        Package.bumpMajor version
-
-
-packageChangeMagnitude :: PackageChanges -> Magnitude
-packageChangeMagnitude pkgChanges =
-    maximum (added : removed : map moduleChangeMagnitude moduleChanges)
-  where
-    moduleChanges =
-      Map.elems (modulesChanged pkgChanges)
-
-    removed =
-      if null (modulesRemoved pkgChanges) then
-        PATCH
-      else
-        MAJOR
-
-    added =
-      if null (modulesAdded pkgChanges) then
-        PATCH
-      else
-        MINOR
-
-
-moduleChangeMagnitude :: ModuleChanges -> Magnitude
-moduleChangeMagnitude moduleChanges =
-  maximum
-    [ changeMagnitude (adtChanges moduleChanges)
-    , changeMagnitude (aliasChanges moduleChanges)
-    , changeMagnitude (valueChanges moduleChanges)
-    ]
-
-
-changeMagnitude :: Changes k v -> Magnitude
-changeMagnitude (Changes added changed removed)
-    | Map.size removed > 0 = MAJOR
-    | Map.size changed > 0 = MAJOR
-    | Map.size added   > 0 = MINOR
-    | otherwise            = PATCH
-
-
-
--- DETECT CHANGES
+-- CHANGES
 
 
 data PackageChanges =
   PackageChanges
-    { modulesAdded :: [Text]
-    , modulesChanged :: Map.Map Text ModuleChanges
-    , modulesRemoved :: [Text]
+    { _modules_added :: [Module.Raw]
+    , _modules_changed :: Map.Map Module.Raw ModuleChanges
+    , _modules_removed :: [Module.Raw]
     }
 
 
 data ModuleChanges =
   ModuleChanges
-    { adtChanges :: Changes Text ([Text], Map.Map Text [Type.Type])
-    , aliasChanges :: Changes Text ([Text], Type.Type)
-    , valueChanges :: Changes Text Type.Type
+    { _unions :: Changes Text Docs.Union
+    , _aliases :: Changes Text Docs.Alias
+    , _values :: Changes Text (Docs.Value Type.Type)
     }
 
 
 data Changes k v =
   Changes
-    { added :: Map.Map k v
-    , changed :: Map.Map k (v,v)
-    , removed :: Map.Map k v
+    { _added :: Map.Map k v
+    , _changed :: Map.Map k (v,v)
+    , _removed :: Map.Map k v
     }
 
 
-diffPackages :: [Docs.Documentation] -> [Docs.Documentation] -> PackageChanges
-diffPackages oldDocs newDocs =
+getChanges :: (Ord k) => (v -> v -> Bool) -> Map.Map k v -> Map.Map k v -> Changes k v
+getChanges isEquivalent old new =
+  let
+    overlap = Map.intersectionWith (,) old new
+    changed = Map.filter (not . uncurry isEquivalent) overlap
+  in
+    Changes (Map.difference new old) changed (Map.difference old new)
+
+
+
+-- DIFF
+
+
+diff :: Docs.Documentation -> Docs.Documentation -> PackageChanges
+diff oldDocs newDocs =
   let
     filterOutPatches chngs =
       Map.filter (\chng -> moduleChangeMagnitude chng /= PATCH) chngs
 
     (Changes added changed removed) =
-      getChanges
-        (\_ _ -> False)
-        (docsToModules oldDocs)
-        (docsToModules newDocs)
+      getChanges (\_ _ -> False) oldDocs newDocs
   in
     PackageChanges
       (Map.keys added)
-      (filterOutPatches (Map.map (uncurry diffModule) changed))
+      (filterOutPatches (Map.map diffModule changed))
       (Map.keys removed)
 
 
 
-data Module = Module
-    { adts :: Map.Map Text ([Text], Map.Map Text [Type.Type])
-    , aliases :: Map.Map Text ([Text], Type.Type)
-    , values :: Map.Map Text Type.Type
-    , version :: Docs.Version
-    }
-
-
-docsToModules :: [Docs.Documentation] -> Map.Map Text Module
-docsToModules docs =
-  Map.fromList (map docToModule docs)
-
-
-docToModule :: Docs.Documentation -> (Text, Module)
-docToModule (Docs.Documentation name _ aliases' unions' values' generatedByVersion) =
-  (,) (Text.pack (Module.nameToString name)) $ Module
-    { adts =
-        Map.fromList $ flip map unions' $ \union ->
-            ( Docs.unionName union
-            , (Docs.unionArgs union, Map.fromList (Docs.unionCases union))
-            )
-
-    , aliases =
-        Map.fromList $ flip map aliases' $ \alias ->
-            (Docs.aliasName alias, (Docs.aliasArgs alias, Docs.aliasType alias))
-
-    , values =
-        Map.fromList $ flip map values' $ \value ->
-            (Docs.valueName value, Docs.valueType value)
-    , version =
-        generatedByVersion
-    }
-
-
-diffModule :: Module -> Module -> ModuleChanges
-diffModule (Module adts aliases values version) (Module adts' aliases' values' version') =
+diffModule :: (Docs.Checked, Docs.Checked) -> ModuleChanges
+diffModule (Docs.Docs _ us1 as1 vs1, Docs.Docs _ us2 as2 vs2) =
   let
-    ignoreOrigin =
-      case (version, version') of
-        (Docs.NonCanonicalTypes, _) -> True
-        (_, Docs.NonCanonicalTypes) -> True
-        (_, _) -> False
+    getEntryChanges isEquiv es1 es2 =
+      getChanges isEquiv (Map.map Docs._details es1) (Map.map Docs._details es2)
   in
     ModuleChanges
-      (getChanges (isEquivalentAdt ignoreOrigin) adts adts')
-      (getChanges (isEquivalentType ignoreOrigin) aliases aliases')
-      (getChanges (\t t' -> isEquivalentType ignoreOrigin ([],t) ([],t')) values values')
+      (getEntryChanges isEquivalentUnion us1 us2)
+      (getEntryChanges isEquivalentAlias as1 as2)
+      (getEntryChanges isEquivalentValue vs1 vs2)
 
 
-getChanges :: (Ord k) => (v -> v -> Bool) -> Map.Map k v -> Map.Map k v -> Changes k v
-getChanges isEquivalent old new =
-  Changes
-    { added =
-        Map.difference new old
-    , changed =
-        Map.filter
-            (not . uncurry isEquivalent)
-            (Map.intersectionWith (,) old new)
-    , removed =
-        Map.difference old new
-    }
+
+-- EQUIVALENCE
 
 
-isEquivalentAdt
-    :: Bool
-    -> ([Text], Map.Map Text [Type.Type])
-    -> ([Text], Map.Map Text [Type.Type])
-    -> Bool
-isEquivalentAdt ignoreOrigin (oldVars, oldCtors) (newVars, newCtors) =
-    Map.size oldCtors == Map.size newCtors
-    && and (zipWith (==) (Map.keys oldCtors) (Map.keys newCtors))
-    && and (Map.elems (Map.intersectionWith equiv oldCtors newCtors))
+isEquivalentUnion :: Docs.Union -> Docs.Union -> Bool
+isEquivalentUnion (Docs.Union oldVars oldCtors) (Docs.Union newVars newCtors) =
+    length oldCtors == length newCtors
+    && and (zipWith (==) (map fst oldCtors) (map fst newCtors))
+    && and (Map.elems (Map.intersectionWith equiv (Map.fromList oldCtors) (Map.fromList newCtors)))
   where
     equiv :: [Type.Type] -> [Type.Type] -> Bool
     equiv oldTypes newTypes =
-        let
-          allEquivalent =
-              zipWith
-                (isEquivalentType ignoreOrigin)
-                (map ((,) oldVars) oldTypes)
-                (map ((,) newVars) newTypes)
-        in
-          length oldTypes == length newTypes
-          && and allEquivalent
+      let
+        allEquivalent =
+          zipWith
+            isEquivalentAlias
+            (map (Docs.Alias oldVars) oldTypes)
+            (map (Docs.Alias newVars) newTypes)
+      in
+        length oldTypes == length newTypes
+        && and allEquivalent
 
 
-isEquivalentType :: Bool -> ([Text], Type.Type) -> ([Text], Type.Type) -> Bool
-isEquivalentType ignoreOrigin (oldVars, oldType) (newVars, newType) =
-  case diffType ignoreOrigin oldType newType of
+isEquivalentAlias :: Docs.Alias -> Docs.Alias -> Bool
+isEquivalentAlias (Docs.Alias oldVars oldType) (Docs.Alias newVars newType) =
+  case diffType oldType newType of
     Nothing ->
-        False
+      False
 
     Just renamings ->
-        length oldVars == length newVars
-        && isEquivalentRenaming (zip oldVars newVars ++ renamings)
+      length oldVars == length newVars
+      && isEquivalentRenaming (zip oldVars newVars ++ renamings)
 
 
+isEquivalentValue :: Docs.Value Type.Type -> Docs.Value Type.Type -> Bool
+isEquivalentValue oldValue newValue =
+  case (oldValue, newValue) of
+    (Docs.Value oldType, Docs.Value newType) ->
+      isEquivalentAlias (Docs.Alias [] oldType) (Docs.Alias [] newType)
 
--- TYPES
-
-
-diffType :: Bool -> Type.Type -> Type.Type -> Maybe [(Text,Text)]
-diffType ignoreOrigin oldType newType =
-  let
-    go = diffType ignoreOrigin
-  in
-  case (oldType, newType) of
-    (Type.Var oldName, Type.Var newName) ->
-        Just [(oldName, newName)]
-
-    (Type.Type oldName, Type.Type newName) ->
-        let
-          format =
-            if ignoreOrigin then dropOrigin else id
-        in
-          if format oldName == format newName then
-            Just []
-          else
-            Nothing
-
-    (Type.Lambda a b, Type.Lambda a' b') ->
-        (++)
-          <$> go a a'
-          <*> go b b'
-
-    (Type.App t ts, Type.App t' ts') ->
-        if length ts /= length ts' then
-          Nothing
-        else
-          (++)
-            <$> go t t'
-            <*> (concat <$> zipWithM go ts ts')
-
-    (Type.Record fields maybeExt, Type.Record fields' maybeExt') ->
-        case (maybeExt, maybeExt') of
-          (Nothing, Just _) ->
-              Nothing
-
-          (Just _, Nothing) ->
-              Nothing
-
-          (Nothing, Nothing) ->
-              diffFields ignoreOrigin fields fields'
-
-          (Just ext, Just ext') ->
-              (++)
-                <$> go ext ext'
-                <*> diffFields ignoreOrigin fields fields'
+    (Docs.Infix oldType oldAssoc oldPrec, Docs.Infix newType newAssoc newPrec) ->
+      isEquivalentAlias (Docs.Alias [] oldType) (Docs.Alias [] newType)
+      && oldAssoc == newAssoc
+      && oldPrec == newPrec
 
     (_, _) ->
+      False
+
+
+
+-- DIFF TYPES
+
+
+diffType :: Type.Type -> Type.Type -> Maybe [(Text,Text)]
+diffType oldType newType =
+  case (oldType, newType) of
+    (Type.Var oldName, Type.Var newName) ->
+      Just [(oldName, newName)]
+
+    (Type.Type oldName, Type.Type newName) ->
+      -- TODO handle old names with no module prefixes
+      if oldName == newName then
+        Just []
+      else
         Nothing
 
+    (Type.Lambda a b, Type.Lambda a' b') ->
+      (++)
+        <$> diffType a a'
+        <*> diffType b b'
 
-diffFields :: Bool -> [(Text, Type.Type)] -> [(Text, Type.Type)] -> Maybe [(Text,Text)]
-diffFields ignoreOrigin rawFields rawFields'
-    | length rawFields /= length rawFields' = Nothing
-    | or (zipWith ((/=) `on` fst) fields fields') = Nothing
-    | otherwise =
-        concat <$> zipWithM (diffType ignoreOrigin `on` snd) fields fields'
-    where
-      fields  = sort rawFields
-      fields' = sort rawFields'
+    (Type.App t ts, Type.App t' ts') ->
+      if length ts /= length ts' then
+        Nothing
+      else
+        (++)
+          <$> diffType t t'
+          <*> (concat <$> zipWithM diffType ts ts')
 
-      sort =
-          List.sortBy (compare `on` fst)
+    (Type.Record fields maybeExt, Type.Record fields' maybeExt') ->
+      case (maybeExt, maybeExt') of
+        (Nothing, Just _) ->
+          Nothing
+
+        (Just _, Nothing) ->
+          Nothing
+
+        (Nothing, Nothing) ->
+          diffFields fields fields'
+
+        (Just ext, Just ext') ->
+          (++)
+            <$> diffType ext ext'
+            <*> diffFields fields fields'
+
+    (_, _) ->
+      Nothing
 
 
-dropOrigin :: Text -> Text
-dropOrigin name =
-    snd (Text.breakOnEnd "." name)
+diffFields :: [(Text, Type.Type)] -> [(Text, Type.Type)] -> Maybe [(Text,Text)]
+diffFields oldRawFields newRawFields =
+  let
+    sort = List.sortBy (compare `on` fst)
+    oldFields = sort oldRawFields
+    newFields = sort newRawFields
+  in
+    if length oldRawFields /= length newRawFields then
+      Nothing
+
+    else if or (zipWith ((/=) `on` fst) oldFields newFields) then
+      Nothing
+
+    else
+      concat <$> zipWithM (diffType `on` snd) oldFields newFields
 
 
 
@@ -367,17 +263,72 @@ compatableVars (old, new) =
 
 
 data TypeVarCategory
-    = CompAppend
-    | Comparable
-    | Appendable
-    | Number
-    | Var
+  = CompAppend
+  | Comparable
+  | Appendable
+  | Number
+  | Var
 
 
 categorizeVar :: Text -> TypeVarCategory
 categorizeVar name
-    | Text.isPrefixOf "compappend" name = CompAppend
-    | Text.isPrefixOf "comparable" name = Comparable
-    | Text.isPrefixOf "appendable" name = Appendable
-    | Text.isPrefixOf "number"     name = Number
-    | otherwise                         = Var
+  | Text.isPrefixOf "compappend" name = CompAppend
+  | Text.isPrefixOf "comparable" name = Comparable
+  | Text.isPrefixOf "appendable" name = Appendable
+  | Text.isPrefixOf "number"     name = Number
+  | otherwise                         = Var
+
+
+
+-- MAGNITUDE
+
+
+data Magnitude
+  = PATCH
+  | MINOR
+  | MAJOR
+  deriving (Eq, Ord)
+
+
+bump :: PackageChanges -> Pkg.Version -> Pkg.Version
+bump changes version =
+  case packageChangeMagnitude changes of
+    PATCH ->
+      Pkg.bumpPatch version
+
+    MINOR ->
+      Pkg.bumpMinor version
+
+    MAJOR ->
+      Pkg.bumpMajor version
+
+
+packageChangeMagnitude :: PackageChanges -> Magnitude
+packageChangeMagnitude (PackageChanges added changed removed) =
+  let
+    addMag = if null added then PATCH else MINOR
+    removeMag = if null removed then PATCH else MAJOR
+    changeMags = map moduleChangeMagnitude (Map.elems changed)
+  in
+    maximum (addMag : removeMag : changeMags)
+
+
+moduleChangeMagnitude :: ModuleChanges -> Magnitude
+moduleChangeMagnitude (ModuleChanges unions aliases values) =
+  maximum
+    [ changeMagnitude unions
+    , changeMagnitude aliases
+    , changeMagnitude values
+    ]
+
+
+changeMagnitude :: Changes k v -> Magnitude
+changeMagnitude (Changes added changed removed) =
+  if Map.size removed > 0 || Map.size changed > 0 then
+    MAJOR
+
+  else if Map.size added > 0 then
+    MINOR
+
+  else
+    PATCH
