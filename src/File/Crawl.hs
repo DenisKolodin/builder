@@ -60,10 +60,11 @@ crawl summary args =
 
     Args.Roots paths ->
       do  headers <- traverse (readFileHeaderN summary) paths
+          let deps = concatMap (_imports . snd) (NonEmpty.toList headers)
           let names = NonEmpty.map fst headers
-          let roots = map (Unvisited Nothing) (NonEmpty.toList names)
+          let unvisited = map (Unvisited Nothing) deps
           let graph = freshGraph (Args.Roots names) (Map.fromList (NonEmpty.toList headers))
-          dfs summary roots graph
+          dfs summary unvisited graph
 
 
 crawlFromSource :: Summary -> FilePath -> Text -> Task.Task (Graph ())
