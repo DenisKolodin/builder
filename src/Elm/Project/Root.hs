@@ -144,6 +144,7 @@ getWithReplFallback =
         Nothing ->
           do  cache <- PerUserCache.getReplRoot
               let root = cache </> "tmp"
+              Dir.createDirectoryIfMissing True root
               Dir.setCurrentDirectory root
               IO.removeDir "elm-stuff"
               Encode.write "elm.json" (Project.encode (Pkg replInfo))
