@@ -113,7 +113,7 @@ toDoc err =
       error ("TODO crawl root")
 
     BadCrawl errors ->
-      error ("TODO crawl " ++ show (Map.keys errors))
+      error ("TODO crawl " ++ show (Map.map Crawl.toString errors))
 
     Cycle names ->
       error ("TODO cycle " ++ show names)

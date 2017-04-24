@@ -1,6 +1,7 @@
 {-# OPTIONS_GHC -Wall #-}
 module Reporting.Error.Crawl
   ( Error(..)
+  , toString
   )
   where
 
@@ -23,3 +24,27 @@ data Error
   | PortsInPackage FilePath
   | EffectsUnexpected FilePath
 
+
+toString :: Error -> String
+toString err =
+  case err of
+    NotFound maybeParent ->
+      "NotFound " ++ show maybeParent
+
+    Duplicates paths pkgs ->
+      "Duplicates " ++ show paths
+
+    BadHeader path _ ->
+      "BadHeader " ++ show path
+
+    NoName path name ->
+      "NoName " ++ show (path, name)
+
+    BadName path name ->
+      "BadName " ++ show (path, name)
+
+    PortsInPackage path ->
+      "PortsInPackage " ++ show path
+
+    EffectsUnexpected path ->
+      "EffectsUnexpected " ++ show path
