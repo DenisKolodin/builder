@@ -7,8 +7,8 @@ module File.IO
   , putByteString
   , putBuilder
   , putFile
-  , remove, exists
-  , removeDir
+  , exists
+  , remove, removeDir
   , andM
   )
   where
@@ -24,7 +24,8 @@ import qualified Data.Text as Text
 import qualified Data.Text.IO as TextIO
 import GHC.IO.Exception ( IOErrorType(InvalidArgument) )
 import qualified System.Directory as Dir
-import System.FilePath (dropFileName)
+import qualified System.FilePath as FP
+import System.FilePath ((</>))
 import qualified System.IO as IO
 import System.IO.Error (ioeGetErrorType, annotateIOError, modifyIOError)
 
@@ -40,7 +41,7 @@ import qualified Reporting.Task as Task
 writeBinary :: (Binary.Binary a) => FilePath -> a -> Task.Task ()
 writeBinary path value =
   liftIO $
-    do  let dir = dropFileName path
+    do  let dir = FP.dropFileName path
         Dir.createDirectoryIfMissing True dir
         Binary.encodeFile path value
 
@@ -160,6 +161,15 @@ putHelp source sink =
 
 
 
+-- EXISTS
+
+
+exists :: FilePath -> Task.Task Bool
+exists filePath =
+  liftIO $ Dir.doesFileExist filePath
+
+
+
 -- REMOVE FILES
 
 
@@ -170,11 +180,6 @@ remove filePath =
         if exists
           then Dir.removeFile filePath
           else return ()
-
-
-exists :: FilePath -> Task.Task Bool
-exists filePath =
-  liftIO $ Dir.doesFileExist filePath
 
 
 removeDir :: FilePath -> IO ()
