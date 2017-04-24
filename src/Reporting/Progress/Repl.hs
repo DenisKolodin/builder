@@ -9,6 +9,7 @@ import Control.Concurrent (forkIO)
 import Control.Concurrent.Chan (Chan, newChan, readChan)
 import Control.Concurrent.MVar (newEmptyMVar, putMVar)
 
+import qualified Reporting.Error as Error
 import qualified Reporting.Progress as Progress
 
 
@@ -37,8 +38,8 @@ loop chan =
 
         Progress.End maybeError ->
           case maybeError of
-            Just _ ->
-              putStrLn "TODO error"
+            Just err ->
+              Error.toStderr err
 
             Nothing ->
               return ()
