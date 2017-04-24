@@ -9,6 +9,7 @@ module File.IO
   , putFile
   , exists
   , remove, removeDir
+  , find
   , andM
   )
   where
@@ -188,6 +189,28 @@ removeDir path =
       if exists
         then Dir.removeDirectoryRecursive path
         else return ()
+
+
+
+-- FIND FILES
+
+
+find :: FilePath -> IO (Maybe FilePath)
+find name =
+  do  subDir <- Dir.getCurrentDirectory
+      findHelp name (FP.splitDirectories subDir)
+
+
+findHelp :: FilePath -> [String] -> IO (Maybe FilePath)
+findHelp name dirs =
+  if null dirs then
+    return Nothing
+
+  else
+    do  exists <- Dir.doesFileExist (FP.joinPath dirs </> name)
+        if exists
+          then return (Just (FP.joinPath dirs))
+          else findHelp name (init dirs)
 
 
 

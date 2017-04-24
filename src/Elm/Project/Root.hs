@@ -10,7 +10,6 @@ import Control.Monad.Trans (liftIO)
 import qualified Data.ByteString.Lazy as BS
 import qualified Data.Map as Map
 import qualified System.Directory as Dir
-import qualified System.FilePath as FP
 import System.FilePath ((</>))
 
 import qualified Elm.Package as Pkg
@@ -47,7 +46,7 @@ get =
 
 moveToRoot :: Task.Task FilePath
 moveToRoot =
-  do  maybeRoot <- liftIO findRoot
+  do  maybeRoot <- liftIO $ IO.find "elm.json"
       case maybeRoot of
         Just root ->
           do  liftIO $ Dir.setCurrentDirectory root
@@ -55,24 +54,6 @@ moveToRoot =
 
         Nothing ->
           Task.throw Error.NoElmJson
-
-
-findRoot :: IO (Maybe FilePath)
-findRoot =
-  do  subDir <- Dir.getCurrentDirectory
-      findRootHelp (FP.splitDirectories subDir)
-
-
-findRootHelp :: [String] -> IO (Maybe FilePath)
-findRootHelp dirs =
-  if null dirs then
-    return Nothing
-
-  else
-    do  exists <- Dir.doesFileExist (FP.joinPath dirs </> "elm.json")
-        if exists
-          then return (Just (FP.joinPath dirs))
-          else findRootHelp (init dirs)
 
 
 
@@ -134,7 +115,7 @@ readPlan =
 
 getWithReplFallback :: IO FilePath
 getWithReplFallback =
-  do  maybeRoot <- findRoot
+  do  maybeRoot <- IO.find "elm.json"
 
       case maybeRoot of
         Just root ->
