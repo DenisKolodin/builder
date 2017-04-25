@@ -1,8 +1,9 @@
 module Deps.Solver.Attempt
-  ( Answer(..)
+  ( Change
+  , toDependencies
   , addToApp
   , addToPkg
-  , view
+  , viewApprovalMessage
   )
   where
 
@@ -28,25 +29,6 @@ import Elm.Project.Constraint (Constraint)
 import qualified Elm.Project.Constraint as Con
 import qualified Reporting.Error as Error
 import qualified Reporting.Task as Task
-
-
-
--- ANSWER
-
-
-data Answer a =
-  Answer
-    { _notLatest :: Maybe Version
-    , _changes :: Map Name (Change a)
-    }
-
-
-makeAnswer :: (Eq a) => Name -> Version -> Map Name a -> Map Name a -> Explorer (Answer a)
-makeAnswer name version old new =
-  do  versions <- Explorer.getVersions name
-      let latest = maximum versions
-      let notLatest = if latest == version then Nothing else Just latest
-      return $ Answer notLatest (detectChanges old new)
 
 
 
@@ -77,18 +59,36 @@ keepChange _ old new =
     Just (Change old new)
 
 
+toDependencies :: Map Name (Change a) -> Map Name a
+toDependencies changes =
+  Map.mapMaybe keepNew changes
+
+
+keepNew :: Change a -> Maybe a
+keepNew change =
+  case change of
+    Insert a ->
+      Just a
+
+    Change _ a ->
+      Just a
+
+    Remove _ ->
+      Nothing
+
+
 
 -- ADD TO APP
 
 
-addToApp :: Name -> AppInfo -> Task.Task (Answer Version)
+addToApp :: Name -> AppInfo -> Task.Task (Map Name (Change Version))
 addToApp pkg info@(AppInfo _ _ deps tests trans) =
   Explorer.run $
     do  let old = Map.unions [ deps, tests, trans ]
         result <- Solver.run (addToAppHelp pkg info)
         case result of
           Just new ->
-            makeAnswer pkg (new ! pkg) old new
+            return $ detectChanges old new
 
           Nothing ->
             do  badNames <- filterM isBadElm (pkg : Map.keys old)
@@ -120,14 +120,14 @@ addToAppHelp pkg (AppInfo _ _ deps tests trans) =
 -- ADD TO PKG
 
 
-addToPkg :: Name -> PkgInfo -> Task.Task (Answer Constraint)
+addToPkg :: Name -> PkgInfo -> Task.Task (Map Name (Change Constraint))
 addToPkg pkg info@(PkgInfo _ _ _ _ _ deps tests _ _) =
   Explorer.run $
     do  let old = Map.union deps tests
         result <- Solver.run (addToPkgHelp pkg info)
         case result of
-          Just (vsn, new) ->
-            makeAnswer pkg vsn old new
+          Just new ->
+            return $ detectChanges old new
 
           Nothing ->
             do  let pkgs = Map.keys deps ++ Map.keys tests
@@ -135,14 +135,13 @@ addToPkg pkg info@(PkgInfo _ _ _ _ _ deps tests _ _) =
                 lift $ Task.throw (Error.NoSolution badNames)
 
 
-addToPkgHelp :: Name -> PkgInfo -> Solver (Version, Map Name Constraint)
+addToPkgHelp :: Name -> PkgInfo -> Solver (Map Name Constraint)
 addToPkgHelp pkg (PkgInfo _ _ _ _ _ deps tests _ _) =
   do  let directs = Map.union deps tests
       let newCons = Map.insert pkg Con.anything directs
       solution <- Solver.solve newCons
-      let vsn = solution ! pkg
-      let con = Con.untilNextMajor vsn
-      return ( vsn, Map.insert pkg con directs )
+      let con = Con.untilNextMajor (solution ! pkg)
+      return $ Map.insert pkg con directs
 
 
 
@@ -163,8 +162,8 @@ isBadElm name =
 -- VIEW
 
 
-view :: (a -> String) -> Map Name (Change a) -> P.Doc
-view toString changes =
+viewApprovalMessage :: (a -> String) -> Map Name (Change a) -> P.Doc
+viewApprovalMessage toString changes =
   let
     widths =
       Map.foldrWithKey (widen toString) (Widths 0 0 0) changes
@@ -172,7 +171,16 @@ view toString changes =
     changeDocs =
       Map.foldrWithKey (addChange toString widths) (Docs [] [] []) changes
   in
-    viewChangeDocs changeDocs
+    P.vcat
+      [ P.cyan (P.text "I can give you way more control over dependencies.") <+> P.text "Learn about it here:"
+      , P.text "<https://github.com/evancz/cli/TODO>"
+      , P.text "That approach is way nicer, especially if you are doing something complex!"
+      , P.text ""
+      , P.text "That said, here is my naive plan:"
+      , viewChangeDocs changeDocs
+      , P.text ""
+      , P.text "Do you approve? [Y/n]: "
+      ]
 
 
 
