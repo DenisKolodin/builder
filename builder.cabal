@@ -53,6 +53,7 @@ Library
         Deps.Diff,
         Deps.Explorer,
         Deps.Get,
+        Deps.Solver.Attempt,
         Deps.Solver.Internal,
         Deps.Verify,
         Deps.Website,

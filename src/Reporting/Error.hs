@@ -55,6 +55,9 @@ data Error
   | AddTrickyConstraint Name Version Constraint
   | BadInstall Version
 
+  -- install
+  | NoSolution [Name]
+
   -- diffs
   | Undiffable
   | VersionInvalid
