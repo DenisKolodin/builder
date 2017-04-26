@@ -7,6 +7,7 @@ module Reporting.Task
   , getPackageCacheDirFor
   , report
   , getReporter
+  , withApproval
   , getSilentRunner
   , workerMVar
   , workerChan
@@ -119,6 +120,23 @@ report progress =
 getReporter :: Task (Progress.Progress -> IO ())
 getReporter =
   asks _tell
+
+
+
+-- APPROVAL
+
+
+withApproval :: Task_ e () -> Task_ e ()
+withApproval task =
+  do  input <- liftIO getLine
+      case input of
+        ""  -> task
+        "Y" -> task
+        "y" -> task
+        "n" -> return ()
+        _   ->
+          do  liftIO $ putStr "Must type 'y' for yes or 'n' for no: "
+              withApproval task
 
 
 

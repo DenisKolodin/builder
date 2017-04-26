@@ -1,34 +1,83 @@
-module Deps.Solver.Attempt
-  ( Change
-  , toDependencies
-  , addToApp
-  , addToPkg
-  , viewApprovalMessage
+module Elm.Install
+  ( install
   )
   where
 
 
-import Control.Monad (filterM, forM, msum)
-import Control.Monad.Trans (lift)
+import Control.Monad (filterM, forM, msum, void)
+import Control.Monad.Except (catchError, lift, liftIO)
 import Data.Map (Map, (!))
 import qualified Data.Map as Map
 import qualified Data.Map.Merge.Lazy as Map
 import qualified Data.Text as Text
-import qualified Text.PrettyPrint.ANSI.Leijen as P
+import qualified System.IO as IO
 import Text.PrettyPrint.ANSI.Leijen ((<>), (<+>))
+import qualified Text.PrettyPrint.ANSI.Leijen as P
 
 import qualified Elm.Package as Pkg
 import Elm.Package (Name, Version)
 
 import Deps.Explorer (Explorer)
 import qualified Deps.Explorer as Explorer
+import qualified Deps.Verify as Verify
 import Deps.Solver.Internal (Solver)
 import qualified Deps.Solver.Internal as Solver
-import Elm.Project.Json (AppInfo(..), PkgInfo(..))
 import Elm.Project.Constraint (Constraint)
 import qualified Elm.Project.Constraint as Con
+import qualified Elm.Project.Json as Project
+import qualified Elm.Project.Summary as Summary
 import qualified Reporting.Error as Error
 import qualified Reporting.Task as Task
+
+
+
+-- INSTALL
+
+
+install :: Name -> Summary.Summary -> Task.Task ()
+install pkg (Summary.Summary root oldProject _ _ _) =
+  let
+    setup project =
+      do  liftIO $ Project.write root project
+          void $ Verify.verify root project
+
+    revert err =
+      do  liftIO $ Project.write root oldProject
+          Task.throw err
+  in
+    do  newProject <- makePlan pkg oldProject
+        Task.withApproval (setup newProject `catchError` revert)
+
+
+
+-- MAKE PLAN
+
+
+makePlan :: Name -> Project.Project -> Task.Task Project.Project
+makePlan pkg project =
+  case project of
+    Project.App info@(Project.AppInfo elm srcDirs deps test _) plan ->
+      do  changes <- addToApp pkg info
+          liftIO $ printPlan Pkg.versionToString changes
+          let solution = Map.mapMaybe keepNew changes
+          let newDeps = Map.intersection solution (Map.insert pkg Pkg.dummyVersion deps)
+          let newTest = Map.intersection solution test
+          let newTrans = Map.difference solution (Map.union newDeps newTest)
+          let newInfo = Project.AppInfo elm srcDirs newDeps newTest newTrans
+          return $ Project.App newInfo plan
+
+    Project.Pkg info@(Project.PkgInfo _ _ _ _ _ deps test _ _) ->
+      do  changes <- addToPkg pkg info
+          liftIO $ printPlan Con.toString changes
+          let solution = Map.mapMaybe keepNew changes
+          return $ Project.Pkg $
+            info
+              { Project._pkg_deps =
+                  Map.intersection solution (Map.insert pkg Con.anything deps)
+              , Project._pkg_test_deps =
+                  Map.intersection solution test
+              }
+
 
 
 
@@ -59,11 +108,6 @@ keepChange _ old new =
     Just (Change old new)
 
 
-toDependencies :: Map Name (Change a) -> Map Name a
-toDependencies changes =
-  Map.mapMaybe keepNew changes
-
-
 keepNew :: Change a -> Maybe a
 keepNew change =
   case change of
@@ -81,8 +125,8 @@ keepNew change =
 -- ADD TO APP
 
 
-addToApp :: Name -> AppInfo -> Task.Task (Map Name (Change Version))
-addToApp pkg info@(AppInfo _ _ deps tests trans) =
+addToApp :: Name -> Project.AppInfo -> Task.Task (Map Name (Change Version))
+addToApp pkg info@(Project.AppInfo _ _ deps tests trans) =
   Explorer.run $
     do  let old = Map.unions [ deps, tests, trans ]
         result <- Solver.run (addToAppHelp pkg info)
@@ -95,8 +139,8 @@ addToApp pkg info@(AppInfo _ _ deps tests trans) =
                 lift $ Task.throw (Error.NoSolution badNames)
 
 
-addToAppHelp :: Name -> AppInfo -> Solver (Map Name Version)
-addToAppHelp pkg (AppInfo _ _ deps tests trans) =
+addToAppHelp :: Name -> Project.AppInfo -> Solver (Map Name Version)
+addToAppHelp pkg (Project.AppInfo _ _ deps tests trans) =
   let
     directs =
       Map.union deps tests
@@ -120,8 +164,8 @@ addToAppHelp pkg (AppInfo _ _ deps tests trans) =
 -- ADD TO PKG
 
 
-addToPkg :: Name -> PkgInfo -> Task.Task (Map Name (Change Constraint))
-addToPkg pkg info@(PkgInfo _ _ _ _ _ deps tests _ _) =
+addToPkg :: Name -> Project.PkgInfo -> Task.Task (Map Name (Change Constraint))
+addToPkg pkg info@(Project.PkgInfo _ _ _ _ _ deps tests _ _) =
   Explorer.run $
     do  let old = Map.union deps tests
         result <- Solver.run (addToPkgHelp pkg info)
@@ -135,8 +179,8 @@ addToPkg pkg info@(PkgInfo _ _ _ _ _ deps tests _ _) =
                 lift $ Task.throw (Error.NoSolution badNames)
 
 
-addToPkgHelp :: Name -> PkgInfo -> Solver (Map Name Constraint)
-addToPkgHelp pkg (PkgInfo _ _ _ _ _ deps tests _ _) =
+addToPkgHelp :: Name -> Project.PkgInfo -> Solver (Map Name Constraint)
+addToPkgHelp pkg (Project.PkgInfo _ _ _ _ _ deps tests _ _) =
   do  let directs = Map.union deps tests
       let newCons = Map.insert pkg Con.anything directs
       solution <- Solver.solve newCons
@@ -162,8 +206,8 @@ isBadElm name =
 -- VIEW
 
 
-viewApprovalMessage :: (a -> String) -> Map Name (Change a) -> P.Doc
-viewApprovalMessage toString changes =
+printPlan :: (a -> String) -> Map Name (Change a) -> IO ()
+printPlan toString changes =
   let
     widths =
       Map.foldrWithKey (widen toString) (Widths 0 0 0) changes
@@ -171,16 +215,17 @@ viewApprovalMessage toString changes =
     changeDocs =
       Map.foldrWithKey (addChange toString widths) (Docs [] [] []) changes
   in
-    P.vcat
-      [ P.cyan (P.text "I can give you way more control over dependencies.") <+> P.text "Learn about it here:"
-      , P.text "<https://github.com/evancz/cli/TODO>"
-      , P.text "That approach is way nicer, especially if you are doing something complex!"
-      , P.text ""
-      , P.text "That said, here is my naive plan:"
-      , viewChangeDocs changeDocs
-      , P.text ""
-      , P.text "Do you approve? [Y/n]: "
-      ]
+    P.displayIO IO.stdout $ P.renderPretty 1 80 $
+      P.vcat
+        [ P.cyan (P.text "I can give you way more control over dependencies.") <+> P.text "Learn about it here:"
+        , P.text "<https://github.com/evancz/cli/TODO>"
+        , P.text "That approach is way nicer, especially if you are doing something complex!"
+        , P.text ""
+        , P.text "That said, here is my naive plan:"
+        , viewChangeDocs changeDocs
+        , P.text ""
+        , P.text "Do you approve? [Y/n]: "
+        ]
 
 
 

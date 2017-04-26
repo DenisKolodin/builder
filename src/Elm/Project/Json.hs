@@ -6,6 +6,7 @@ module Elm.Project.Json
   , AppInfo(..)
   , PkgInfo(..)
   -- json
+  , write
   , encode
   , decoder
   , pkgDecoder
@@ -31,6 +32,7 @@ import qualified Data.Set as Set
 import qualified Data.Text as Text
 import Data.Map (Map)
 import Data.Set (Set)
+import System.FilePath ((</>))
 
 import qualified Elm.Compiler.Module as Module
 import qualified Elm.Package as Pkg
@@ -179,6 +181,15 @@ getSourceDirs project =
 getEffect :: Project -> Bool
 getEffect project =
   get (const False) _pkg_effects project
+
+
+
+-- WRITE
+
+
+write :: FilePath -> Project -> IO ()
+write root project =
+  E.write (root </> "elm.json") (encode project)
 
 
 
