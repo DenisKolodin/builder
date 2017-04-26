@@ -53,7 +53,7 @@ Library
         Deps.Diff,
         Deps.Explorer,
         Deps.Get,
-        Deps.Solver.Internal,
+        Deps.Solver,
         Deps.Verify,
         Deps.Website,
         Elm.Install,

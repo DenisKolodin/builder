@@ -1,4 +1,10 @@
-module Deps.Solver.Internal (Solver, run, solve) where
+module Deps.Solver
+  ( Solver
+  , run
+  , solve
+  )
+  where
+
 
 import Control.Monad (foldM, guard, mzero, msum)
 import Control.Monad.Logic (LogicT, runLogicT, lift)

@@ -22,7 +22,7 @@ import qualified Json.Encode as Encode
 
 import qualified Deps.Explorer as Explorer
 import qualified Deps.Get as Get
-import qualified Deps.Solver.Internal as Solver
+import qualified Deps.Solver as Solver
 import qualified Deps.Website as Website
 import qualified Elm.Compiler as Compiler
 import qualified Elm.Project.Json as Project

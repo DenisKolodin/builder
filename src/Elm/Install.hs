@@ -20,8 +20,7 @@ import Elm.Package (Name, Version)
 import Deps.Explorer (Explorer)
 import qualified Deps.Explorer as Explorer
 import qualified Deps.Verify as Verify
-import Deps.Solver.Internal (Solver)
-import qualified Deps.Solver.Internal as Solver
+import qualified Deps.Solver as Solver
 import Elm.Project.Constraint (Constraint)
 import qualified Elm.Project.Constraint as Con
 import qualified Elm.Project.Json as Project
@@ -139,7 +138,7 @@ addToApp pkg info@(Project.AppInfo _ _ deps tests trans) =
                 lift $ Task.throw (Error.NoSolution badNames)
 
 
-addToAppHelp :: Name -> Project.AppInfo -> Solver (Map Name Version)
+addToAppHelp :: Name -> Project.AppInfo -> Solver.Solver (Map Name Version)
 addToAppHelp pkg (Project.AppInfo _ _ deps tests trans) =
   let
     directs =
@@ -179,7 +178,7 @@ addToPkg pkg info@(Project.PkgInfo _ _ _ _ _ deps tests _ _) =
                 lift $ Task.throw (Error.NoSolution badNames)
 
 
-addToPkgHelp :: Name -> Project.PkgInfo -> Solver (Map Name Constraint)
+addToPkgHelp :: Name -> Project.PkgInfo -> Solver.Solver (Map Name Constraint)
 addToPkgHelp pkg (Project.PkgInfo _ _ _ _ _ deps tests _ _) =
   do  let directs = Map.union deps tests
       let newCons = Map.insert pkg Con.anything directs
