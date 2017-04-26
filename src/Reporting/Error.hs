@@ -8,13 +8,11 @@ module Reporting.Error
   )
   where
 
-import Data.Text (Text)
+
 import qualified Data.List as List
 import qualified Data.Map as Map
-import Text.PrettyPrint.ANSI.Leijen
-  ( Doc, (<+>), align, dullred, dullyellow
-  , fillSep, indent, red, text, vcat
-  )
+import qualified Text.PrettyPrint.ANSI.Leijen as P
+import Text.PrettyPrint.ANSI.Leijen ((<+>))
 
 import qualified Elm.Compiler as Compiler
 import qualified Elm.Compiler.Module as Module
@@ -103,14 +101,17 @@ toStderr err =
   Help.toStderr (toDoc err)
 
 
-toDoc :: Error -> Doc
+toDoc :: Error -> P.Doc
 toDoc err =
   case err of
+    NoElmJson ->
+      error "TODO no elm.json file yet. That means it is a new project?"
+
     Assets assetError ->
       Asset.toDoc assetError
 
     BadDep name version ->
-      error ("TODO " ++ Pkg.toString name ++ " " ++ Pkg.versionToString version)
+      error ("TODO BadDep " ++ Pkg.toString name ++ " " ++ Pkg.versionToString version)
 
     BadCrawlRoot err ->
       error ("TODO crawl root")
@@ -140,9 +141,9 @@ toDoc err =
       Help.makeErrorDoc
         ( "The following HTTP request failed:"
         )
-        [ indent 4 $ dullyellow $ text $ "<" ++ url ++ ">"
-        , text "Here is the error message I was able to extract:"
-        , indent 4 $ reflow message
+        [ P.indent 4 $ P.dullyellow $ P.text $ "<" ++ url ++ ">"
+        , P.text "Here is the error message I was able to extract:"
+        , P.indent 4 $ reflow message
         ]
 
     ZipDownloadFailed name version ->
@@ -156,12 +157,12 @@ toDoc err =
       Help.makeErrorDoc
         ( "This change is too tricky for me. Your elm.json already lists the following dependency:"
         )
-        [ indent 4 $ text $ showDependency name constraint
+        [ P.indent 4 $ P.text $ showDependency name constraint
         , reflow $
             "So I am not sure how to make that include version "
             ++ Pkg.versionToString version
             ++ " as well. Maybe you want one of the following constraints?"
-        , indent 4 $ vcat $ map text $
+        , P.indent 4 $ P.vcat $ map P.text $
             [ Con.toString (Con.expand constraint version)
             , Con.toString (Con.untilNextMajor version)
             ]
@@ -175,6 +176,11 @@ toDoc err =
           ++ Pkg.versionToString version ++ " of what?"
         )
         []
+
+    NoSolution badPackages ->
+      error $
+        "TODO the following packages are incompatible with this version of Elm: "
+        ++ unwords (map Pkg.toString badPackages)
 
     Undiffable ->
       Help.makeErrorDoc "This package has not been published, there is nothing to diff against!" []
@@ -196,8 +202,8 @@ toDoc err =
       Help.makeErrorDoc
         ( "Some of the fields in elm.json have not been filled in yet:"
         )
-        [ vcat (map text problems)
-        , text $ "Fill these in and try to publish again!"
+        [ P.vcat (map P.text problems)
+        , P.text $ "Fill these in and try to publish again!"
         ]
 
     MissingTag version ->
@@ -208,7 +214,7 @@ toDoc err =
         Help.makeErrorDoc
           ( "Libraries must be tagged in git, but tag " ++ vsn ++ " was not found."
           )
-          [ vcat $ map text $
+          [ P.vcat $ map P.text $
               [ "These tags make it possible to find this specific version on GitHub."
               , "To tag the most recent commit and push it to GitHub, run this:"
               , ""
@@ -223,7 +229,7 @@ toDoc err =
           \ You cannot publish it again! Run the following command to see what\
           \ the new version should be:"
         )
-        [ indent 4 $ text "elm-package bump"
+        [ P.indent 4 $ P.text "elm-package bump"
         ]
 
     Unbumpable vsn versions ->
@@ -267,7 +273,7 @@ toDoc err =
           ++ Pkg.versionToString new ++ ", indicating a " ++ show magnitude
           ++ " change to the public API. This does not match the API diff given by:"
         )
-        [ indent 4 $ text $
+        [ P.indent 4 $ P.text $
             "elm-package diff " ++ Pkg.versionToString old
 
         , reflow $
@@ -285,36 +291,36 @@ showDependency name constraint =
     show (Pkg.toString name) ++ ": " ++ show (Con.toString constraint)
 
 
-hintToDoc :: Hint -> Doc
+hintToDoc :: Hint -> P.Doc
 hintToDoc hint =
   case hint of
     EmptyConstraint name constraint ->
       stack
         [ reflow $ "Your elm.json has the following dependency:"
-        , indent 4 $ text $ showDependency name constraint
+        , P.indent 4 $ P.text $ showDependency name constraint
         , reflow $
             "But there are no released versions in that range! I recommend\
             \ removing that constraint by hand and adding it back with:"
-        , indent 4 $ text $ "elm-package install " ++ Pkg.toString name
+        , P.indent 4 $ P.text $ "elm-package install " ++ Pkg.toString name
         ]
 
     IncompatibleConstraint name constraint viableVersion ->
       stack
         [ reflow $ "Your elm.json has the following dependency:"
-        , indent 4 $ text $ showDependency name constraint
+        , P.indent 4 $ P.text $ showDependency name constraint
         , reflow $
             "But none of the versions in that range work with Elm "
             ++ Pkg.versionToString Compiler.version ++ ". I recommend removing\
             \ that dependency by hand and adding it back with:"
-        , indent 4 $
-            text ("elm-package install " ++ Pkg.toString name)
-            <+> dullyellow (text (Pkg.versionToString viableVersion))
+        , P.indent 4 $
+            P.text ("elm-package install " ++ Pkg.toString name)
+            <+> P.dullyellow (P.text (Pkg.versionToString viableVersion))
         ]
 
     IncompatiblePackage name ->
       let
         intro =
-          map text $ words $
+          map P.text $ words $
             "There are no versions of " ++ Pkg.toString name ++ " that work with Elm "
             ++ Pkg.versionToString Compiler.version ++ "."
 
@@ -330,17 +336,17 @@ hintToDoc hint =
               instead "elm-lang/virtual-dom"
 
             _ ->
-              map text (words "Maybe the maintainer has not updated it yet.")
+              map P.text (words "Maybe the maintainer has not updated it yet.")
       in
-        fillSep $ intro ++ outro
+        P.fillSep $ intro ++ outro
 
 
-instead :: String -> [Doc]
+instead :: String -> [P.Doc]
 instead newName =
-  map text (words "Remove that constraint and use")
-  ++ [ dullyellow (text newName), text "instead!" ]
+  map P.text (words "Remove that constraint and use")
+  ++ [ P.dullyellow (P.text newName), P.text "instead!" ]
 
 
-hintToBullet :: Hint -> Doc
+hintToBullet :: Hint -> P.Doc
 hintToBullet hint =
-  dullred (text "-->") <+> align (hintToDoc hint)
+  P.dullred (P.text "-->") <+> P.align (hintToDoc hint)
