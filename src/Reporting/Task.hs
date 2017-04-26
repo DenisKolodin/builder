@@ -32,6 +32,7 @@ import qualified Network.HTTP.Client.TLS as Http
 import qualified Network.HTTP.Types as Http
 import System.Directory (createDirectoryIfMissing)
 import System.FilePath ((</>))
+import qualified System.IO as IO
 
 import qualified Elm.Compiler as Compiler
 import Elm.Package (Name, Version)
@@ -128,7 +129,8 @@ getReporter =
 
 withApproval :: Task_ e () -> Task_ e ()
 withApproval task =
-  do  input <- liftIO getLine
+  do  liftIO $ IO.hFlush IO.stdout
+      input <- liftIO getLine
       case input of
         ""  -> task
         "Y" -> task
