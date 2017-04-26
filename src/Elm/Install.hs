@@ -24,6 +24,7 @@ import qualified Deps.Solver as Solver
 import Elm.Project.Constraint (Constraint)
 import qualified Elm.Project.Constraint as Con
 import qualified Elm.Project.Json as Project
+import qualified Elm.Project.Root as Root
 import qualified Elm.Project.Summary as Summary
 import qualified Reporting.Error as Error
 import qualified Reporting.Task as Task
@@ -33,19 +34,20 @@ import qualified Reporting.Task as Task
 -- INSTALL
 
 
-install :: Name -> Summary.Summary -> Task.Task ()
-install pkg (Summary.Summary root oldProject _ _ _) =
-  let
-    setup project =
-      do  liftIO $ Project.write root project
-          void $ Verify.verify root project
+install :: Name -> Task.Task ()
+install pkg =
+  do  (root, oldProject) <- Root.unsafeGet
+      newProject <- makePlan pkg oldProject
 
-    revert err =
-      do  liftIO $ Project.write root oldProject
-          Task.throw err
-  in
-    do  newProject <- makePlan pkg oldProject
-        Task.withApproval (setup newProject `catchError` revert)
+      let upgrade =
+            do  liftIO $ Project.write root newProject
+                void $ Verify.verify root newProject
+
+      let revert err =
+            do  liftIO $ Project.write root oldProject
+                Task.throw err
+
+      Task.withApproval (upgrade `catchError` revert)
 
 
 
@@ -55,28 +57,35 @@ install pkg (Summary.Summary root oldProject _ _ _) =
 makePlan :: Name -> Project.Project -> Task.Task Project.Project
 makePlan pkg project =
   case project of
-    Project.App info@(Project.AppInfo elm srcDirs deps test _) plan ->
+    Project.App info@(Project.AppInfo elm srcDirs deps test trans) plan ->
       do  changes <- addToApp pkg info
           liftIO $ printPlan Pkg.versionToString changes
-          let solution = Map.mapMaybe keepNew changes
-          let newDeps = Map.intersection solution (Map.insert pkg Pkg.dummyVersion deps)
-          let newTest = Map.intersection solution test
-          let newTrans = Map.difference solution (Map.union newDeps newTest)
+          let news = Map.mapMaybe keepNew changes
+          let newDeps = addNews (Just pkg) news deps
+          let newTest = addNews Nothing news test
+          let newTrans = Map.union (Map.difference news (Map.union newDeps newTest)) trans
           let newInfo = Project.AppInfo elm srcDirs newDeps newTest newTrans
           return $ Project.App newInfo plan
 
     Project.Pkg info@(Project.PkgInfo _ _ _ _ _ deps test _ _) ->
       do  changes <- addToPkg pkg info
-          liftIO $ printPlan Con.toString changes
-          let solution = Map.mapMaybe keepNew changes
+          liftIO $ printPlan (show . Con.toString) changes
+          let news = Map.mapMaybe keepNew changes
           return $ Project.Pkg $
             info
-              { Project._pkg_deps =
-                  Map.intersection solution (Map.insert pkg Con.anything deps)
-              , Project._pkg_test_deps =
-                  Map.intersection solution test
+              { Project._pkg_deps = addNews (Just pkg) news deps
+              , Project._pkg_test_deps = addNews Nothing news test
               }
 
+
+addNews :: Maybe Name -> Map Name a -> Map Name a -> Map Name a
+addNews pkg new old =
+  Map.merge
+    Map.preserveMissing
+    (Map.mapMaybeMissing (\k v -> if Just k == pkg then Just v else Nothing))
+    (Map.zipWithMatched (\_ _ n -> n))
+    old
+    new
 
 
 
@@ -216,11 +225,7 @@ printPlan toString changes =
   in
     P.displayIO IO.stdout $ P.renderPretty 1 80 $
       P.vcat
-        [ P.cyan (P.text "I can give you way more control over dependencies.") <+> P.text "Learn about it here:"
-        , P.text "<https://github.com/evancz/cli/TODO>"
-        , P.text "That approach is way nicer, especially if you are doing something complex!"
-        , P.text ""
-        , P.text "That said, here is my naive plan:"
+        [ P.text "Here is my plan:"
         , viewChangeDocs changeDocs
         , P.text ""
         , P.text "Do you approve? [Y/n]: "
@@ -253,7 +258,10 @@ viewNonZero title entries =
   if null entries then
     []
   else
-    P.text "" : P.text title : reverse entries
+    [ P.text ""
+    , P.text title
+    , P.indent 2 (P.vcat (reverse entries))
+    ]
 
 
 
@@ -275,14 +283,13 @@ addChange toString widths name change (Docs inserts changes removes) =
 
 viewInsert :: (a -> String) -> Widths -> Name -> a -> P.Doc
 viewInsert toString (Widths nameWidth leftWidth _) name new =
-  P.green (P.text "+") <+> viewName nameWidth name <+> pad leftWidth (toString new)
+  viewName nameWidth name <+> pad leftWidth (toString new)
 
 
 viewChange :: (a -> String) -> Widths -> Name -> a -> a -> P.Doc
 viewChange toString (Widths nameWidth leftWidth rightWidth) name old new =
   P.hsep
-    [ P.yellow (P.text "+")
-    , viewName nameWidth name
+    [ viewName nameWidth name
     , pad leftWidth (toString old)
     , P.text "=>"
     , pad rightWidth (toString new)
@@ -291,7 +298,7 @@ viewChange toString (Widths nameWidth leftWidth rightWidth) name old new =
 
 viewRemove :: (a -> String) -> Widths -> Name -> a -> P.Doc
 viewRemove toString (Widths nameWidth leftWidth _) name old =
-  P.red (P.text "+") <+> viewName nameWidth name <+> pad leftWidth (toString old)
+  viewName nameWidth name <+> pad leftWidth (toString old)
 
 
 viewName :: Int -> Name -> P.Doc

@@ -2,6 +2,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Elm.Project.Root
   ( get
+  , unsafeGet
   , getWithReplFallback
   )
   where
@@ -38,6 +39,11 @@ get =
   do  root <- moveToRoot
       project <- readProject
       Verify.verify root project
+
+
+unsafeGet :: Task.Task (FilePath, Project)
+unsafeGet =
+  (,) <$> moveToRoot <*> readProject
 
 
 
