@@ -68,6 +68,7 @@ Library
         File.Crawl,
         File.Find,
         File.Hash,
+        File.Header,
         File.Plan,
         Generate.App,
         Generate.Functions,

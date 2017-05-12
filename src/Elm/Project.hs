@@ -60,7 +60,7 @@ compile summary paths =
 compileForRepl :: Text -> Maybe String -> Task.Task (Maybe FilePath)
 compileForRepl source maybeName =
   do  summary <- getRoot
-      graph <- Crawl.crawlFromSource summary "REPL" source
+      graph <- Crawl.crawlFromSource summary source
       (dirty, ifaces) <- Plan.plan summary graph
       let project = Summary._project summary
       answers <- Compile.compile project ifaces dirty

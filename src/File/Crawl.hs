@@ -2,7 +2,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 module File.Crawl
   ( Graph(..)
-  , Info(..)
   , crawl
   , crawlFromSource
   )
@@ -17,20 +16,14 @@ import Data.List.NonEmpty (NonEmpty((:|)))
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 import Data.Text (Text)
-import qualified Data.Time.Calendar as Day
-import qualified Data.Time.Clock as Time
-import qualified System.Directory as Dir
 
-import qualified Elm.Compiler as Compiler
 import qualified Elm.Compiler.Module as Module
 import qualified Elm.Package as Pkg
 
-import qualified Elm.Project.Json as Project
-import Elm.Project.Json (Project)
 import Elm.Project.Summary (Summary(..))
 import qualified File.Args as Args
 import qualified File.Find as Find
-import qualified File.IO as IO
+import qualified File.Header as Header
 import qualified Generate.Plan as Plan
 import qualified Reporting.Error as Error
 import qualified Reporting.Error.Crawl as E
@@ -56,40 +49,30 @@ crawl summary args =
           dfs summary roots graph
 
     Args.Roots (path :| []) ->
-      crawlHelp summary =<< readFileHeader1 summary path
+      crawlHelp summary =<< Header.readOneFile summary path
 
     Args.Roots paths ->
-      do  headers <- traverse (readFileHeaderN summary) paths
-          let deps = concatMap (_imports . snd) (NonEmpty.toList headers)
+      do  headers <- Header.readManyFiles summary paths
+          let deps = concatMap (Header._imports . snd) (NonEmpty.toList headers)
           let names = NonEmpty.map fst headers
           let unvisited = map (Unvisited Nothing) deps
           let graph = freshGraph (Args.Roots names) (Map.fromList (NonEmpty.toList headers))
           dfs summary unvisited graph
 
 
-crawlFromSource :: Summary -> FilePath -> Text -> Task.Task (Graph ())
-crawlFromSource summary@(Summary _ project _ _ _) fakePath source =
+crawlFromSource :: Summary -> Text -> Task.Task (Graph ())
+crawlFromSource summary@(Summary _ project _ _ _) source =
   crawlHelp summary =<<
-    atRoot (parseHeader project fakePath fakeTime source)
+    Header.readSource project source
 
 
-fakeTime :: Time.UTCTime
-fakeTime =
-  Time.UTCTime (Day.fromGregorian 2990 2 2) 0
-
-
-crawlHelp :: Summary -> ( Maybe Module.Raw, Info ) -> Task.Task (Graph ())
-crawlHelp summary ( maybeName, info@(Info _ _ _ deps) ) =
+crawlHelp :: Summary -> ( Maybe Module.Raw, Header.Info ) -> Task.Task (Graph ())
+crawlHelp summary ( maybeName, info@(Header.Info _ _ _ deps) ) =
   do  let name = maybe "Main" id maybeName
       let args = Args.Roots (name :| [])
       let roots = map (Unvisited maybeName) deps
       let graph = freshGraph args (Map.singleton name info)
       dfs summary roots graph
-
-
-atRoot :: CTask a -> Task.Task a
-atRoot task =
-  Task.mapError Error.BadCrawlRoot task
 
 
 
@@ -123,9 +106,9 @@ dfsHelp summary chan oldPending oldSeen unvisited graph =
         else
           do  asset <- liftIO $ readChan chan
               case asset of
-                Right (Local name info) ->
+                Right (Local name info@(Header.Info _ _ _ imports)) ->
                   do  let newGraph = graph { _locals = Map.insert name info (_locals graph) }
-                      let deps = map (Unvisited (Just name)) (_imports info)
+                      let deps = map (Unvisited (Just name)) imports
                       dfsHelp summary chan (pending - 1) seen deps newGraph
 
                 Right (Kernel name path) ->
@@ -165,26 +148,17 @@ crawlNew summary chan (seen, n) unvisited@(Unvisited _ name) =
 data Graph problems =
   Graph
     { _args :: Args.Args Module.Raw
-    , _locals :: Map.Map Module.Raw Info
+    , _locals :: Map.Map Module.Raw Header.Info
     , _kernels :: Map.Map Module.Raw FilePath
     , _foreigns :: Map.Map Module.Raw Pkg.Package
     , _problems :: problems
     }
 
 
-data Info =
-  Info
-    { _path :: FilePath
-    , _time :: Time.UTCTime
-    , _source :: Text
-    , _imports :: [Module.Raw]
-    }
-
-
 type WorkGraph = Graph (Map.Map Module.Raw E.Error)
 
 
-freshGraph :: Args.Args Module.Raw -> Map.Map Module.Raw Info -> WorkGraph
+freshGraph :: Args.Args Module.Raw -> Map.Map Module.Raw Header.Info -> WorkGraph
 freshGraph args locals =
   Graph args locals Map.empty Map.empty Map.empty
 
@@ -201,7 +175,7 @@ data Unvisited =
 
 
 data Asset
-  = Local Module.Raw Info
+  = Local Module.Raw Header.Info
   | Kernel Module.Raw FilePath
   | Foreign Module.Raw Pkg.Package
 
@@ -212,7 +186,7 @@ crawlFile summary (Unvisited maybeParent name) =
     do  asset <- Find.find summary maybeParent name
         case asset of
           Find.Local path ->
-            readModuleHeader summary name path
+            uncurry Local <$> Header.readModule summary name path
 
           Find.Kernel path ->
             return (Kernel name path)
@@ -222,96 +196,14 @@ crawlFile summary (Unvisited maybeParent name) =
 
 
 
--- READ HEADER
-
-
-type CTask a = Task.Task_ E.Error a
-
-
-readModuleHeader :: Summary -> Module.Raw -> FilePath -> CTask Asset
-readModuleHeader summary expectedName path =
-  do  time <- liftIO $ Dir.getModificationTime path
-      source <- liftIO $ IO.readUtf8 path
-      (maybeName, info) <- parseHeader (_project summary) path time source
-      name <- checkName path expectedName maybeName
-      return (Local name info)
-
-
-readFileHeader1 :: Summary -> FilePath -> Task.Task (Maybe Module.Raw, Info)
-readFileHeader1 summary path =
-  do  time <- liftIO $ Dir.getModificationTime path
-      source <- liftIO $ IO.readUtf8 path
-      atRoot $ parseHeader (_project summary) path time source
-
-
-readFileHeaderN :: Summary -> FilePath -> Task.Task (Module.Raw, Info)
-readFileHeaderN summary path =
-  do  time <- liftIO $ Dir.getModificationTime path
-      source <- liftIO $ IO.readUtf8 path
-      (maybeName, info) <- atRoot $ parseHeader (_project summary) path time source
-      case maybeName of
-        Nothing ->
-          error ("TODO module at " ++ path ++ " needs a name")
-
-        Just name ->
-          return (name, info)
-
-
--- TODO get regions on data extracted here
-parseHeader :: Project -> FilePath -> Time.UTCTime -> Text -> CTask (Maybe Module.Raw, Info)
-parseHeader project path time source =
-  case Compiler.parseDependencies (Project.getName project) source of
-    Right (tag, maybeName, deps) ->
-      do  checkTag project path tag
-          return ( maybeName, Info path time source deps )
-
-    Left msg ->
-      Task.throw (E.BadHeader path msg)
-
-
-checkName :: FilePath -> Module.Raw -> Maybe Module.Raw -> CTask Module.Raw
-checkName path expectedName maybeName =
-  case maybeName of
-    Nothing ->
-      Task.throw (E.NoName path expectedName)
-
-    Just actualName ->
-      if expectedName == actualName
-        then return expectedName
-        else Task.throw (E.BadName path actualName)
-
-
-checkTag :: Project -> FilePath -> Compiler.Tag -> CTask ()
-checkTag project path tag =
-  case tag of
-    Compiler.Normal ->
-      return ()
-
-    Compiler.Port ->
-      case project of
-        Project.App _ _ ->
-          return ()
-
-        Project.Pkg _ ->
-          Task.throw (E.PortsInPackage path)
-
-    Compiler.Effect ->
-      if Project.getEffect project then
-        return ()
-
-      else
-        Task.throw (E.EffectsUnexpected path)
-
-
-
 -- DETECT CYCLES
 
 
 checkForCycles :: Graph a -> Task.Task ()
 checkForCycles (Graph _ locals _ _ _) =
   let
-    toNode (name, info) =
-      (name, name, _imports info)
+    toNode (name, Header.Info _ _ _ imports) =
+      (name, name, imports)
 
     components =
       Graph.stronglyConnComp (map toNode (Map.toList locals))

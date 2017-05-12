@@ -24,6 +24,7 @@ import qualified Elm.Package as Pkg
 import qualified Elm.Project.Json as Project
 import qualified Elm.Project.Summary as Summary
 import qualified File.Crawl as Crawl
+import qualified File.Header as Header
 import qualified Reporting.Task as Task
 import qualified Stuff.Paths
 
@@ -88,9 +89,9 @@ getStatus
   -> MVar (Dict (MVar Status))
   -> Dict Pkg.Package
   -> Module.Raw
-  -> Crawl.Info
+  -> Header.Info
   -> IO (MVar Status)
-getStatus env statusMVars foreigns name (Crawl.Info path time src deps) =
+getStatus env statusMVars foreigns name (Header.Info path time src deps) =
   do  mvar <- newEmptyMVar
 
       void $ forkIO $ putMVar mvar =<<
