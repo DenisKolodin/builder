@@ -121,7 +121,7 @@ fakeTime =
 parse :: Project -> FilePath -> Time.UTCTime -> Text -> Task (Maybe Module.Raw, Info)
 parse project path time source =
   -- TODO get regions on data extracted here
-  case Compiler.parseDependencies (Project.getName project) source of
+  case Compiler.parseHeader (Project.getName project) source of
     Right (tag, maybeName, deps) ->
       do  checkTag project path tag
           return ( maybeName, Info path time source deps )
