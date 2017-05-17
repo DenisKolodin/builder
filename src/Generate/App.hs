@@ -12,6 +12,7 @@ import qualified Data.ByteString.Builder as BS
 import qualified Data.List as List
 import Data.Monoid ((<>))
 import qualified Data.Text as Text
+import qualified Data.Text.Encoding as Text
 import Text.RawString.QQ (r)
 
 import qualified Elm.Compiler as Elm
@@ -52,7 +53,7 @@ genExport :: Maybe Module.Interfaces -> Module.Canonical -> BS.Builder
 genExport debug canonicalName@(Module.Canonical _ name) =
   let
     programFunction =
-      "TODO_main"
+      BS.byteString $ Text.encodeUtf8 $ Module.canonicalToMain canonicalName
 
     nameChunks =
       map Text.unpack (Text.splitOn "." name)
