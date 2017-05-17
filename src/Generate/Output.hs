@@ -10,8 +10,7 @@ module Generate.Output
 import Control.Monad.Trans (liftIO)
 import qualified Data.List.NonEmpty as NonEmpty
 import qualified Data.Map as Map
-import Data.Map ((!))
-import System.FilePath ((</>), (<.>))
+import System.FilePath ((</>))
 
 import qualified Elm.Compiler as Compiler
 import qualified Elm.Compiler.Module as Module
@@ -52,18 +51,15 @@ generate summary graph@(Crawl.Graph args _ _ _ _) =
 
 
 generateMonolith :: Summary.Summary -> Crawl.Graph () -> [Module.Raw] -> Task.Task ()
-generateMonolith summary@(Summary.Summary _ project _ _ deps) graph names =
+generateMonolith summary@(Summary.Summary _ project _ _ _) graph names =
   do
       objectGraph <- organize summary graph
       let pkg = Project.getName project
       let roots = map (Module.Canonical pkg) names
-      let table = Obj.symbolTable Map.empty
-      let (natives, builder) = Compiler.generate table objectGraph (Obj.mains roots)
+      let builder = Compiler.generate objectGraph (Obj.mains roots)
 
-      cacheDir <- Task.getPackageCacheDir
       liftIO $ IO.put "elm.js" $
         do  IO.putBuilder App.header
-            mapM_ (IO.putFile . pathTo cacheDir deps) natives
             IO.putBuilder builder
             IO.putBuilder (App.footer Nothing roots)
 
@@ -73,18 +69,15 @@ generateMonolith summary@(Summary.Summary _ project _ _ deps) graph names =
 
 
 generateReplFile :: Summary.Summary -> Crawl.Graph () -> Repl.Output -> Task.Task FilePath
-generateReplFile summary@(Summary.Summary _ project _ _ deps) graph output =
+generateReplFile summary@(Summary.Summary _ project _ _ _) graph output =
   do
       objectGraph <- organize summary graph
       let pkg = Project.getName project
       let roots = Repl.toRoots pkg output
-      let table = Obj.symbolTable Map.empty
-      let (natives, builder) = Compiler.generate table objectGraph roots
+      let builder = Compiler.generate objectGraph roots
 
-      cacheDir <- Task.getPackageCacheDir
       liftIO $ IO.put Paths.temp $
         do  IO.putBuilder Repl.header
-            mapM_ (IO.putFile . pathTo cacheDir deps) natives
             IO.putBuilder builder
             IO.putBuilder (Repl.footer pkg output)
 
@@ -121,16 +114,3 @@ generatePlan :: Summary.Summary -> Crawl.Graph () -> Plan.Plan -> Task.Task ()
 generatePlan summary graph plan =
   error "TODO generate based on the plan"
 
-
-
--- KERNEL PATHS
-
-
-pathTo :: FilePath -> Summary.DepsGraph -> Module.Canonical -> FilePath
-pathTo cacheDir deps (Module.Canonical pkg name) =
-  cacheDir
-  </> Pkg.toFilePath pkg
-  </> Pkg.versionToString (fst (deps ! pkg))
-  </> "src"
-  </> Module.nameToPath name
-  <.> "js"

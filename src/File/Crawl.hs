@@ -17,6 +17,7 @@ import qualified Data.Map as Map
 import qualified Data.Set as Set
 import Data.Text (Text)
 
+import qualified Elm.Compiler as Compiler
 import qualified Elm.Compiler.Module as Module
 import qualified Elm.Package as Pkg
 
@@ -24,6 +25,7 @@ import Elm.Project.Summary (Summary(..))
 import qualified File.Args as Args
 import qualified File.Find as Find
 import qualified File.Header as Header
+import qualified File.IO as IO
 import qualified Generate.Plan as Plan
 import qualified Reporting.Error as Error
 import qualified Reporting.Error.Crawl as E
@@ -111,8 +113,8 @@ dfsHelp summary chan oldPending oldSeen unvisited graph =
                       let deps = map (Unvisited (Just name)) imports
                       dfsHelp summary chan (pending - 1) seen deps newGraph
 
-                Right (Kernel name path) ->
-                  do  let kernels = Map.insert name path (_kernels graph)
+                Right (Kernel name info) ->
+                  do  let kernels = Map.insert name info (_kernels graph)
                       let newGraph = graph { _kernels = kernels }
                       dfsHelp summary chan (pending - 1) seen [] newGraph
 
@@ -149,7 +151,7 @@ data Graph problems =
   Graph
     { _args :: Args.Args Module.Raw
     , _locals :: Map.Map Module.Raw Header.Info
-    , _kernels :: Map.Map Module.Raw FilePath
+    , _kernels :: Map.Map Module.Raw Compiler.KernelInfo
     , _foreigns :: Map.Map Module.Raw Pkg.Package
     , _problems :: problems
     }
@@ -176,7 +178,7 @@ data Unvisited =
 
 data Asset
   = Local Module.Raw Header.Info
-  | Kernel Module.Raw FilePath
+  | Kernel Module.Raw Compiler.KernelInfo
   | Foreign Module.Raw Pkg.Package
 
 
@@ -188,11 +190,17 @@ crawlFile summary (Unvisited maybeParent name) =
           Find.Local path ->
             uncurry Local <$> Header.readModule summary name path
 
-          Find.Kernel path ->
-            return (Kernel name path)
-
           Find.Foreign pkg ->
             return (Foreign name pkg)
+
+          Find.Kernel path ->
+            do  source <- liftIO $ IO.readUtf8 path
+                case Compiler.parseKernel source of
+                  Right info ->
+                    return (Kernel name info)
+
+                  Left err ->
+                    Task.throw (E.BadHeader path err)
 
 
 

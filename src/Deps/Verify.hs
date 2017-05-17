@@ -258,7 +258,7 @@ getIface name version info infos depIfaces =
 
               Paths.removeStuff root
 
-              updateCache root name info solution results
+              updateCache root name info solution graph results
 
 
 
@@ -295,9 +295,10 @@ updateCache
   -> Name
   -> PkgInfo
   -> Map Name Version
+  -> Crawl.Graph ()
   -> Map Module.Raw Compiler.Result
   -> Task.Task Module.Interfaces
-updateCache root name info solution results =
+updateCache root name info solution graph results =
   do  let path = root </> "cached.dat"
       let deps = Map.map Set.singleton solution
       let ifaces = crush name info results
@@ -312,7 +313,7 @@ updateCache root name info solution results =
           do  IO.writeBinary (root </> "ifaces.dat") ifaces
               IO.writeBinary path deps
               let resultList = Map.elems results
-              let objs = Obj.unions (map Compiler._objs resultList)
+              let objs = Obj.graphForPackage (Crawl._kernels graph) resultList
               IO.writeBinary (root </> "objs.dat") objs
 
               let docs = Maybe.mapMaybe Compiler._docs resultList
