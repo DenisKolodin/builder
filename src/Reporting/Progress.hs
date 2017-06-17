@@ -49,7 +49,8 @@ data Msg = Progress Progress | End (Maybe Error)
 
 data Progress
   -- download packages
-  = DownloadStart [(Name, Version)]
+  = DownloadSkip
+  | DownloadStart [(Name, Version)]
   | DownloadPkgStart Name Version
   | DownloadPkgEnd Name Version Outcome
   | DownloadEnd Outcome

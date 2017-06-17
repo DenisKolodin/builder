@@ -110,7 +110,7 @@ download :: [(Name, Version)] -> Task.Task ()
 download packages =
   case packages of
     [] ->
-      return ()
+      Task.report Progress.DownloadSkip
 
     _ : _ ->
       do  Task.report (Progress.DownloadStart packages)

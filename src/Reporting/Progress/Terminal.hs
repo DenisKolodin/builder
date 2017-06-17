@@ -72,6 +72,10 @@ loopHelp chan progress state@(State total good bad) =
 
     -- DOWNLOADS
 
+    DownloadSkip ->
+      do  putStrLn "Dependencies loaded from local cache."
+          loop chan state
+
     DownloadStart [] ->
       loop chan state
 
