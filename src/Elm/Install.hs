@@ -25,7 +25,6 @@ import Elm.Project.Constraint (Constraint)
 import qualified Elm.Project.Constraint as Con
 import qualified Elm.Project.Json as Project
 import qualified Elm.Project.Root as Root
-import qualified Elm.Project.Summary as Summary
 import qualified Reporting.Error as Error
 import qualified Reporting.Task as Task
 
@@ -37,45 +36,49 @@ import qualified Reporting.Task as Task
 install :: Name -> Task.Task ()
 install pkg =
   do  (root, oldProject) <- Root.unsafeGet
-      newProject <- makePlan pkg oldProject
-
-      let upgrade =
+      makePlan pkg oldProject $ \newProject ->
+        let
+          upgrade =
             do  liftIO $ Project.write root newProject
                 void $ Verify.verify root newProject
 
-      let revert err =
+          revert err =
             do  liftIO $ Project.write root oldProject
                 Task.throw err
-
-      Task.withApproval (upgrade `catchError` revert)
+        in
+          upgrade `catchError` revert
 
 
 
 -- MAKE PLAN
 
 
-makePlan :: Name -> Project.Project -> Task.Task Project.Project
-makePlan pkg project =
+makePlan :: Name -> Project.Project -> (Project.Project -> Task.Task ()) -> Task.Task ()
+makePlan pkg project attemptInstall =
   case project of
     Project.App info@(Project.AppInfo elm srcDirs deps test trans) plan ->
       do  changes <- addToApp pkg info
-          liftIO $ printPlan Pkg.versionToString changes
+
           let news = Map.mapMaybe keepNew changes
           let newDeps = addNews (Just pkg) news deps
           let newTest = addNews Nothing news test
           let newTrans = Map.union (Map.difference news (Map.union newDeps newTest)) trans
           let newInfo = Project.AppInfo elm srcDirs newDeps newTest newTrans
-          return $ Project.App newInfo plan
+          let newProject = Project.App newInfo plan
+
+          withApproval Pkg.versionToString changes (attemptInstall newProject)
 
     Project.Pkg info@(Project.PkgInfo _ _ _ _ _ deps test _ _) ->
       do  changes <- addToPkg pkg info
-          liftIO $ printPlan (show . Con.toString) changes
+
           let news = Map.mapMaybe keepNew changes
-          return $ Project.Pkg $
-            info
-              { Project._pkg_deps = addNews (Just pkg) news deps
-              , Project._pkg_test_deps = addNews Nothing news test
-              }
+          let newProject = Project.Pkg $
+                info
+                  { Project._pkg_deps = addNews (Just pkg) news deps
+                  , Project._pkg_test_deps = addNews Nothing news test
+                  }
+
+          withApproval (show . Con.toString) changes (attemptInstall newProject)
 
 
 addNews :: Maybe Name -> Map Name a -> Map Name a -> Map Name a
@@ -214,22 +217,35 @@ isBadElm name =
 -- VIEW
 
 
-printPlan :: (a -> String) -> Map Name (Change a) -> IO ()
-printPlan toString changes =
+withApproval :: (a -> String) -> Map Name (Change a) -> Task.Task () -> Task.Task ()
+withApproval toString changes attemptInstall =
   let
     widths =
       Map.foldrWithKey (widen toString) (Widths 0 0 0) changes
 
     changeDocs =
       Map.foldrWithKey (addChange toString widths) (Docs [] [] []) changes
+
+    printDoc doc =
+      P.displayIO IO.stdout $ P.renderPretty 1 80 doc
   in
-    P.displayIO IO.stdout $ P.renderPretty 1 80 $
-      P.vcat
-        [ P.text "Here is my plan:"
-        , viewChangeDocs changeDocs
-        , P.text ""
-        , P.text "Do you approve? [Y/n]: "
-        ]
+    case changeDocs of
+      Docs [] [] [] ->
+        do  liftIO $ putStrLn "Already installed. No changes necessary!"
+
+      Docs inserts [] [] ->
+        do  liftIO $ putStrLn "Adding the following dependencies:\n"
+            liftIO $ printDoc $ P.indent 2 (P.vcat (reverse inserts))
+            liftIO $ putStrLn "\n"
+            attemptInstall
+
+      Docs _ _ _ ->
+        do  liftIO $ putStrLn "Here is my plan:"
+            liftIO $ printDoc $ viewChangeDocs changeDocs
+            liftIO $ putStrLn "\nDo you approve? [Y/n]: "
+            Task.withApproval attemptInstall
+
+
 
 
 
