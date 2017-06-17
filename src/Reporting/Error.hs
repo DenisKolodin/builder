@@ -123,7 +123,7 @@ toDoc err =
       error ("TODO cycle " ++ show names)
 
     Compile errors ->
-      error ("TODO compile " ++ show (map Compile.toDocs (Map.elems errors)))
+      P.vcat (concatMap Compile.toDocs (Map.elems errors))
 
     AppBadElm version ->
       error ("TODO AppBadElm - " ++ Pkg.versionToString version)
