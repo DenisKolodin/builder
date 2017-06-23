@@ -9,23 +9,19 @@ module Reporting.Task
   , getReporter
   , withApproval
   , getSilentRunner
-  , workerMVar
   , workerChan
-  , fetch, fetchFromInternet, makeUrl
+  , runHttp
   )
   where
 
-import qualified Control.Exception as E
 import Control.Concurrent (forkIO)
 import Control.Concurrent.Chan (Chan, newChan, readChan, writeChan)
-import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar)
 import Control.Monad (forever, join, replicateM_)
 import Control.Monad.Except (ExceptT, runExceptT, throwError, withExceptT)
 import Control.Monad.Reader (ReaderT, runReaderT, ask, asks)
 import Control.Monad.Trans (liftIO)
 import qualified Data.ByteString.Char8 as BSC
 import qualified Data.List as List
-import qualified Network
 import qualified Network.HTTP as Http (urlEncodeVars)
 import qualified Network.HTTP.Client as Http
 import qualified Network.HTTP.Client.TLS as Http
@@ -65,20 +61,19 @@ data Env =
 
 run :: Progress.Reporter -> Task a -> IO (Maybe a)
 run (Progress.Reporter tell end) task =
-  Network.withSocketsDo $
-    do  root <- PerUserCache.getPackageRoot
-        pool <- initPool 4
-        httpManager <- Http.newManager Http.tlsManagerSettings
-        let env = Env root pool httpManager tell
-        result <- runReaderT (runExceptT task) env
-        case result of
-          Left err ->
-            do  end (Just err)
-                return Nothing
+  do  root <- PerUserCache.getPackageRoot
+      pool <- initPool 4
+      httpManager <- Http.newManager Http.tlsManagerSettings
+      let env = Env root pool httpManager tell
+      result <- runReaderT (runExceptT task) env
+      case result of
+        Left err ->
+          do  end (Just err)
+              return Nothing
 
-          Right answer ->
-            do  end Nothing
-                return (Just answer)
+        Right answer ->
+          do  end Nothing
+              return (Just answer)
 
 
 throw :: e -> Task_ e a
@@ -156,18 +151,6 @@ getSilentRunner =
 -- THREAD POOL
 
 
-workerMVar :: Task_ e a -> Task_ x (MVar (Either e a))
-workerMVar task =
-  do  env <- ask
-      mvar <- liftIO newEmptyMVar
-
-      liftIO $ _worker env $
-        do  result <- runReaderT (runExceptT task) env
-            putMVar mvar result
-
-      return mvar
-
-
 workerChan :: Chan (Either e a) -> Task_ e a -> Task_ x ()
 workerChan chan task =
   do  env <- ask
@@ -188,88 +171,11 @@ initPool size =
 
 
 
--- URLs
-
-
-domain :: String
-domain =
-  "http://localhost:8000"
-
-
-makeUrl :: String -> [(String,String)] -> String
-makeUrl path params =
-  let
-    query =
-      if null params then
-        ""
-      else
-        "?" ++ Http.urlEncodeVars (versionParam : params)
-  in
-    domain ++ "/" ++ path ++ query
-
-
-versionParam :: (String, String)
-versionParam =
-  ( "elm-package-version"
-  , Pkg.versionToString Compiler.version
-  )
-
-
-
 -- HTTP
 
 
-type Handler a = Http.Request -> Http.Manager -> IO (Either String a)
-
-
-fetch :: String -> [(String, String)] -> Handler a -> Task a
-fetch path params handler =
-  fetchFromInternet (makeUrl path params) handler
-
-
-fetchFromInternet :: String -> Handler a -> Task a
-fetchFromInternet url handler =
-  do  manager <- asks _httpManager
-      result <- liftIO (fetchSafe url manager handler)
+runHttp :: (Http.Manager -> (Progress.Progress -> IO ()) -> IO (Either Error.Error a)) -> Task a
+runHttp fetcher =
+  do  (Env _ _ manager tell) <- ask
+      result <- liftIO $ fetcher manager tell
       either throwError return result
-
-
-fetchSafe :: String -> Http.Manager -> Handler a -> IO (Either Error.Error a)
-fetchSafe url manager handler =
-  fetchUnsafe url manager handler
-    `E.catch` handleHttpError url
-    `E.catch` \e -> handleAnyError url (e :: E.SomeException)
-
-
-fetchUnsafe :: String -> Http.Manager -> Handler a -> IO (Either Error.Error a)
-fetchUnsafe url manager handler =
-  do  request <- Http.parseUrlThrow url
-      result <- handler request manager
-      case result of
-        Right value ->
-          return (Right value)
-
-        Left msg ->
-          return (Left (Error.HttpRequestFailed url msg))
-
-
-handleHttpError :: String -> Http.HttpException -> IO (Either Error.Error a)
-handleHttpError url exception =
-  case exception of
-    Http.StatusCodeException (Http.Status _code err) headers _ ->
-      return $ Left $ Error.HttpRequestFailed url $ BSC.unpack $
-        case List.lookup "X-Response-Body-Start" headers of
-          Just msg | not (BSC.null msg) ->
-            msg
-
-          _ ->
-            err
-
-    _ ->
-      handleAnyError url exception
-
-
-handleAnyError :: (E.Exception e) => String -> e -> IO (Either Error.Error a)
-handleAnyError url exception =
-  return $ Left $ Error.HttpRequestFailed url (show exception)
-
