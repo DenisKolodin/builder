@@ -96,7 +96,7 @@ verifyPkg info =
 
 verifyArtifacts :: Map Name Version -> Task.Task RawInfo
 verifyArtifacts solution =
-  do  download =<< filterM noSrc (Map.toList solution)
+  do  Website.download =<< filterM noSrc (Map.toList solution)
       verifyBuildArtifacts solution
 
 
@@ -104,28 +104,6 @@ noSrc :: (Name, Version) -> Task.Task Bool
 noSrc (name, version) =
   do  root <- Task.getPackageCacheDirFor name version
       liftIO $ not <$> doesDirectoryExist (root </> "src")
-
-
-download :: [(Name, Version)] -> Task.Task ()
-download packages =
-  case packages of
-    [] ->
-      Task.report Progress.DownloadSkip
-
-    _ : _ ->
-      do  Task.report (Progress.DownloadStart packages)
-          mvars <- forM packages $ \(name, version) ->
-            Task.workerMVar $ Website.download name version
-
-          results <- liftIO $ traverse readMVar mvars
-
-          case sequence_ results of
-            Left err ->
-              do  Task.report (Progress.DownloadEnd Progress.Bad)
-                  Task.throw err
-
-            Right _ ->
-              Task.report (Progress.DownloadEnd Progress.Good)
 
 
 

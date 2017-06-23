@@ -5,15 +5,18 @@ module Deps.Website
   , getNewPackages
   , getAllPackages
   , download
+  , register
   )
   where
 
+import Prelude hiding (zip)
 import qualified Codec.Archive.Zip as Zip
-import Control.Monad.Trans (liftIO)
+import Control.Monad (void)
 import qualified Data.Binary as Binary
 import qualified Data.Binary.Get as Binary
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as LBS
+import qualified Data.Digest.Pure.SHA as SHA
 import qualified Data.HashMap.Lazy as HashMap
 import qualified Data.Map as Map
 import qualified Data.Text as Text
@@ -27,6 +30,7 @@ import qualified Json.Decode as Decode
 
 import qualified Reporting.Progress as Progress
 import qualified Reporting.Task as Task
+import qualified Reporting.Task.Http as Http
 
 
 
@@ -35,7 +39,7 @@ import qualified Reporting.Task as Task
 
 getElmJson :: Name -> Version -> Task.Task LBS.ByteString
 getElmJson name version =
-  fetchByteString (packageUrl name version "elm.json")
+  Http.run $ fetchByteString (packageUrl name version "elm.json")
 
 
 packageUrl :: Name -> Version -> FilePath -> String
@@ -54,7 +58,7 @@ packageUrl name version filePath =
 
 getNewPackages :: Int -> Task.Task [(Name, Version)]
 getNewPackages index =
-  fetchJson (Decode.list newPkgDecoder) ("all-packages/since/" ++ show index)
+  Http.run $ fetchJson (Decode.list newPkgDecoder) ("all-packages/since/" ++ show index)
 
 
 newPkgDecoder :: Decode.Decoder ( Name, Version )
@@ -79,7 +83,7 @@ newPkgDecoder =
 
 getAllPackages :: Task.Task (Map.Map Name [Version])
 getAllPackages =
-  fetchJson allPkgsDecoder "all-packages"
+  Http.run $ fetchJson allPkgsDecoder "all-packages"
 
 
 allPkgsDecoder :: Decode.Decoder (Map.Map Name [Version])
@@ -101,82 +105,123 @@ allPkgsDecoder =
 -- HELPERS
 
 
-fetchByteString :: String -> Task.Task LBS.ByteString
+fetchByteString :: String -> Http.Fetch LBS.ByteString
 fetchByteString path =
-  Task.fetch path [] $ \request manager ->
+  Http.package path [] $ \request manager ->
     do  response <- Client.httpLbs request manager
         return $ Right $ Client.responseBody response
 
 
-fetchJson :: Decode.Decoder a -> String -> Task.Task a
+fetchJson :: Decode.Decoder a -> String -> Http.Fetch a
 fetchJson decoder path =
-  Task.fetch path [] $ \request manager ->
+  Http.package path [] $ \request manager ->
     do  response <- Client.httpLbs request manager
         case Decode.parse decoder (Client.responseBody response) of
           Right value ->
-            return (Right value)
+            return $ Right value
 
           Left _ ->
-            return (Left ("I received corrupt JSON from server. TODO explain"))
+            return $ Left "I received corrupt JSON from server. TODO explain"
 
 
 
 -- DOWNLOAD
 
 
-download :: Name -> Version -> Task.Task ()
-download name version =
-  do  Task.report (Progress.DownloadPkgStart name version)
-      let url = toGithubUrl name version
-      archive <-
-        Task.fetchFromInternet url $ \request manager ->
-          Client.withResponse request manager toArchive
-      writeGitHubArchive name version archive
-      Task.report (Progress.DownloadPkgEnd name version Progress.Good)
+download :: [(Name, Version)] -> Task.Task ()
+download packages =
+  case packages of
+    [] ->
+      Task.report Progress.DownloadSkip
+
+    _ ->
+      do  cache <- Task.getPackageCacheDir
+
+          let start = Progress.DownloadStart packages
+          let toEnd = Progress.DownloadEnd
+
+          void $ Http.run $ Http.report start toEnd $
+            Http.parallel $ map (downloadHelp cache) packages
 
 
-toGithubUrl :: Pkg.Name -> Pkg.Version -> String
-toGithubUrl name version =
-  "https://github.com/" ++ Pkg.toUrl name ++ "/zipball/" ++ Pkg.versionToString version ++ "/"
+downloadHelp :: FilePath -> (Name, Version) -> Http.Fetch ()
+downloadHelp cache (name, version) =
+  let
+    endpointUrl =
+      "endpoint/" ++ Pkg.toUrl name ++ "/" ++ Pkg.versionToString version
+  in
+    Http.andThen (fetchJson endpointDecoder endpointUrl) $ \(endpoint, hash) ->
+      let
+        start = Progress.DownloadPkgStart name version
+        toEnd = Progress.DownloadPkgEnd name version
+      in
+        Http.report start toEnd $
+          Http.anything endpoint $ \request manager ->
+            Client.withResponse request manager (writeArchive cache name version hash)
+
+
+endpointDecoder :: Decode.Decoder (String, String)
+endpointDecoder =
+  Decode.map2 (,)
+    (Decode.field "url" Decode.string)
+    (Decode.field "hash" Decode.string)
 
 
 
--- RESPONSE TO ZIP ARCHIVE
+-- WRITE ZIP ARCHIVE
 
 
-toArchive :: Client.Response Client.BodyReader -> IO (Either String Zip.Archive)
-toArchive response =
-  toArchiveHelp
-    (Binary.runGetIncremental Binary.get)
-    (Client.responseBody response)
+writeArchive :: FilePath -> Name -> Version -> String -> Client.Response Client.BodyReader -> IO (Either String ())
+writeArchive cache name version hash response =
+  writeArchiveHelp
+    (WE cache name version hash (Client.responseBody response))
+    (WS 0 SHA.sha1Incremental (Binary.runGetIncremental Binary.get))
 
 
-toArchiveHelp :: Binary.Decoder a -> Client.BodyReader -> IO (Either String a)
-toArchiveHelp decoder bodyReader =
-  case decoder of
-    Binary.Done _ _ value ->
-      return $ Right value
+data WriteEnv =
+  WE
+    { _cache :: FilePath
+    , _name :: Name
+    , _version :: Version
+    , _hash :: String
+    , _body :: Client.BodyReader
+    }
 
+
+data WriteState =
+  WS
+    { _len :: !Int
+    , _sha :: !(Binary.Decoder SHA.SHA1State)
+    , _zip :: !(Binary.Decoder Zip.Archive)
+    }
+
+
+writeArchiveHelp :: WriteEnv -> WriteState -> IO (Either String ())
+writeArchiveHelp env@(WE cache name version hash body) (WS len sha zip) =
+  case zip of
     Binary.Fail _ _ _ ->
       return $ Left "seems like the .zip is corrupted"
 
     Binary.Partial k ->
-      do  c <- Client.brRead bodyReader
-          let chunk = if BS.null c then Nothing else Just c
-          toArchiveHelp (k chunk) bodyReader
+      do  chunk <- Client.brRead body
+          writeArchiveHelp env $ WS
+            { _len = len + BS.length chunk
+            , _sha = Binary.pushChunk sha chunk
+            , _zip = k (if BS.null chunk then Nothing else Just chunk)
+            }
 
-
-
--- WRITE GITHUB ARCHIVE
-
-
-writeGitHubArchive :: Name -> Version -> Zip.Archive -> Task.Task ()
-writeGitHubArchive name version archive =
-  do  cache <- Task.getPackageCacheDir
-      let opts = [Zip.OptDestination (cache </> Pkg.toFilePath name)]
-      let vsn = Pkg.versionToString version
-      let entries = map (replaceRoot vsn) (Zip.zEntries archive)
-      liftIO $ mapM_ (Zip.writeEntry opts) entries
+    Binary.Done _ _ archive ->
+      let
+        realHash =
+          SHA.showDigest (SHA.completeSha1Incremental sha len)
+      in
+        if hash /= realHash then
+          return $ Left $ "Expecting hash of content to be " ++ hash ++ ", but it is " ++ realHash
+        else
+          do  let opts = [Zip.OptDestination (cache </> Pkg.toFilePath name)]
+              let vsn = Pkg.versionToString version
+              let entries = map (replaceRoot vsn) (Zip.zEntries archive)
+              Right <$> mapM_ (Zip.writeEntry opts) entries
 
 
 replaceRoot :: String -> Zip.Entry -> Zip.Entry
@@ -201,14 +246,14 @@ register name version =
       ]
 
     files =
-      [ Multi.partFileSource "documentation" "documentation.json"
-      , Multi.partFileSource "description" "description.json"
-      , Multi.partFileSource "readme" "README.md"
+      [ Multi.partFileSource "documentation.json" "documentation.json"
+      , Multi.partFileSource "elm.json" "elm.json"
+      , Multi.partFileSource "README.md" "README.md"
       ]
   in
-    Task.fetch "register" params $ \request manager ->
-      do  request' <- Multi.formDataBody files request
-          let request'' = request' { Client.responseTimeout = Nothing }
-          Client.httpLbs request'' manager
+    Http.run $ Http.package "register" params $ \rawRequest manager ->
+      do  requestWithBody <- Multi.formDataBody files rawRequest
+          let request = requestWithBody { Client.responseTimeout = Nothing }
+          void $ Client.httpLbs request manager
           return (Right ())
 
