@@ -14,7 +14,7 @@ import qualified Codec.Archive.Zip as Zip
 import Control.Monad (void)
 import qualified Data.Binary as Binary
 import qualified Data.Binary.Get as Binary
-import qualified Data.ByteString as BS
+import qualified Data.ByteString.Char8 as BS
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.Digest.Pure.SHA as SHA
 import qualified Data.HashMap.Lazy as HashMap
@@ -39,17 +39,8 @@ import qualified Reporting.Task.Http as Http
 
 getElmJson :: Name -> Version -> Task.Task LBS.ByteString
 getElmJson name version =
-  Http.run $ fetchByteString (packageUrl name version "elm.json")
-
-
-packageUrl :: Name -> Version -> FilePath -> String
-packageUrl name version filePath =
-  "packages/"
-  ++ Pkg.toUrl name
-  ++ "/"
-  ++ Pkg.versionToString version
-  ++ "/"
-  ++ filePath
+  Http.run $ fetchByteString $
+    "packages/" ++ Pkg.toUrl name ++ "/" ++ Pkg.versionToString version ++ "/elm.json"
 
 
 
@@ -148,7 +139,7 @@ downloadHelp :: FilePath -> (Name, Version) -> Http.Fetch ()
 downloadHelp cache (name, version) =
   let
     endpointUrl =
-      "endpoint/" ++ Pkg.toUrl name ++ "/" ++ Pkg.versionToString version
+      "packages/" ++ Pkg.toUrl name ++ "/" ++ Pkg.versionToString version ++ "/endpoint.json"
   in
     Http.andThen (fetchJson endpointDecoder endpointUrl) $ \(endpoint, hash) ->
       let
@@ -237,18 +228,20 @@ replaceRoot root entry =
 -- REGISTER PACKAGES
 
 
-register :: Name -> Version -> Task.Task ()
-register name version =
+register :: Name -> Version -> String -> SHA.Digest SHA.SHA1State -> Task.Task ()
+register name version commitHash digest =
   let
     params =
       [ ("name", Pkg.toString name)
       , ("version", Pkg.versionToString version)
+      , ("commit-hash", commitHash)
       ]
 
     files =
-      [ Multi.partFileSource "documentation.json" "documentation.json"
-      , Multi.partFileSource "elm.json" "elm.json"
+      [ Multi.partFileSource "elm.json" "elm.json"
+      , Multi.partFileSource "docs.json" "docs.json"
       , Multi.partFileSource "README.md" "README.md"
+      , Multi.partBS "github-hash" (BS.pack (SHA.showDigest digest))
       ]
   in
     Http.run $ Http.package "register" params $ \rawRequest manager ->
