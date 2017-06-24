@@ -47,11 +47,8 @@ data Error
   | PkgBadElm Constraint
   | PkgBadDeps
 
-  -- misc
+  -- http
   | HttpRequestFailed String String
-  | ZipDownloadFailed Name Version
-  | AddTrickyConstraint Name Version Constraint
-  | BadInstall Version
 
   -- install
   | NoSolution [Name]
@@ -60,7 +57,6 @@ data Error
   | Undiffable
   | VersionInvalid
   | VersionJustChanged
-  | BadMetadata [String]
   | MissingTag Version
 
   -- bumps
@@ -68,6 +64,10 @@ data Error
   | Unbumpable Version [Version]
   | InvalidBump Version Version
   | BadBump Version Version Magnitude Version Magnitude
+
+  -- publish
+  | PublishWithoutSummary
+  | PublishWithoutExposed
 
 
 data Magnitude
@@ -146,37 +146,6 @@ toDoc err =
         , P.indent 4 $ reflow message
         ]
 
-    ZipDownloadFailed name version ->
-      Help.makeErrorDoc
-        ( "Problem when downloading the " ++ Pkg.toString name
-          ++ " " ++ Pkg.versionToString version ++ " code."
-        )
-        []
-
-    AddTrickyConstraint name version constraint ->
-      Help.makeErrorDoc
-        ( "This change is too tricky for me. Your elm.json already lists the following dependency:"
-        )
-        [ P.indent 4 $ P.text $ showDependency name constraint
-        , reflow $
-            "So I am not sure how to make that include version "
-            ++ Pkg.versionToString version
-            ++ " as well. Maybe you want one of the following constraints?"
-        , P.indent 4 $ P.vcat $ map P.text $
-            [ Con.toString (Con.expand constraint version)
-            , Con.toString (Con.untilNextMajor version)
-            ]
-        , reflow $
-            "Modify elm.json by hand to be exactly what you want."
-        ]
-
-    BadInstall version ->
-      Help.makeErrorDoc
-        ( "You specified a version number, but not a package! Version "
-          ++ Pkg.versionToString version ++ " of what?"
-        )
-        []
-
     NoSolution badPackages ->
       error $
         "TODO the following packages are incompatible with this version of Elm: "
@@ -197,14 +166,6 @@ toDoc err =
         "Cannot publish a package with an invalid version. Be sure you commit any\
         \ necessary changes and tag them appropriately."
         []
-
-    BadMetadata problems ->
-      Help.makeErrorDoc
-        ( "Some of the fields in elm.json have not been filled in yet:"
-        )
-        [ P.vcat (map P.text problems)
-        , P.text $ "Fill these in and try to publish again!"
-        ]
 
     MissingTag version ->
       let
@@ -284,6 +245,12 @@ toDoc err =
         , reflow $
             "Also, next time use `elm-package bump` and I'll figure all this out for you!"
         ]
+
+    PublishWithoutSummary ->
+      error "TODO bad summary"
+
+    PublishWithoutExposed ->
+      error "TODO no exposed modules"
 
 
 showDependency :: Name -> Constraint -> String
