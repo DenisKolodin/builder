@@ -1,12 +1,13 @@
 {-# OPTIONS_GHC -Wall #-}
 module Deps.Get
   ( all
+  , Mode(..)
   , info
   )
   where
 
 import Prelude hiding (all)
-import Control.Monad.Except (liftIO)
+import Control.Monad.Except (catchError, liftIO)
 import qualified Data.ByteString.Lazy as BS
 import qualified Data.List as List
 import qualified Data.Map as Map
@@ -22,6 +23,7 @@ import qualified Elm.Project.Json as Project
 import qualified File.IO as IO
 import qualified Reporting.Error as Error
 import qualified Reporting.Error.Assets as E
+import qualified Reporting.Progress as Progress
 import qualified Reporting.Task as Task
 import qualified Json.Decode as Decode
 
@@ -30,13 +32,16 @@ import qualified Json.Decode as Decode
 -- ALL VERSIONS
 
 
-all :: Task.Task (Map Name [Version])
-all =
+data Mode = RequireLatest | AllowOffline
+
+
+all :: Mode -> Task.Task (Map Name [Version])
+all mode =
   do  dir <- Task.getPackageCacheDir
       let versionsFile = dir </> "versions.dat"
       exists <- liftIO $ Dir.doesFileExist versionsFile
       if exists
-        then fetchNew versionsFile
+        then fetchNew versionsFile mode
         else fetchAll versionsFile
 
 
@@ -48,11 +53,19 @@ fetchAll versionsFile =
       return packages
 
 
-fetchNew :: FilePath -> Task.Task (Map Name [Version])
-fetchNew versionsFile =
+fetchNew :: FilePath -> Mode -> Task.Task (Map Name [Version])
+fetchNew versionsFile mode =
   do  (size, packages) <- IO.readBinary versionsFile
 
-      news <- Website.getNewPackages size
+      news <-
+        case mode of
+          RequireLatest ->
+            Website.getNewPackages size
+
+          AllowOffline ->
+            Website.getNewPackages size `catchError` \_ ->
+              do  Task.report Progress.UnableToLoadLatestPackages
+                  return []
 
       if null news
         then return packages

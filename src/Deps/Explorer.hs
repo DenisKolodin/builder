@@ -57,7 +57,7 @@ data Info =
 
 run :: Explorer a -> Task.Task a
 run explorer =
-  do  versions <- Get.all
+  do  versions <- Get.all Get.AllowOffline
       evalStateT explorer (Metadata versions Map.empty)
 
 
