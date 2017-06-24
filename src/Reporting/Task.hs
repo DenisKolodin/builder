@@ -1,4 +1,4 @@
-{-# OPTIONS_GHC -Wall -fno-warn-unused-do-bind #-}
+{-# OPTIONS_GHC -Wall #-}
 {-# LANGUAGE OverloadedStrings #-}
 module Reporting.Task
   ( Task, Task_, run, throw, mapError
@@ -8,6 +8,7 @@ module Reporting.Task
   , report
   , getReporter
   , withApproval
+  , getApproval
   , getSilentRunner
   , workerChan
   , runHttp
@@ -20,17 +21,12 @@ import Control.Monad (forever, join, replicateM_)
 import Control.Monad.Except (ExceptT, runExceptT, throwError, withExceptT)
 import Control.Monad.Reader (ReaderT, runReaderT, ask, asks)
 import Control.Monad.Trans (liftIO)
-import qualified Data.ByteString.Char8 as BSC
-import qualified Data.List as List
-import qualified Network.HTTP as Http (urlEncodeVars)
 import qualified Network.HTTP.Client as Http
 import qualified Network.HTTP.Client.TLS as Http
-import qualified Network.HTTP.Types as Http
 import System.Directory (createDirectoryIfMissing)
 import System.FilePath ((</>))
 import qualified System.IO as IO
 
-import qualified Elm.Compiler as Compiler
 import Elm.Package (Name, Version)
 import qualified Elm.Package as Pkg
 import qualified Elm.PerUserCache as PerUserCache
@@ -124,16 +120,22 @@ getReporter =
 
 withApproval :: Task_ e () -> Task_ e ()
 withApproval task =
+  do  approval <- getApproval
+      if approval then task else return ()
+
+
+getApproval :: Task_ e Bool
+getApproval =
   do  liftIO $ IO.hFlush IO.stdout
       input <- liftIO getLine
       case input of
-        ""  -> task
-        "Y" -> task
-        "y" -> task
-        "n" -> return ()
+        ""  -> return True
+        "Y" -> return True
+        "y" -> return True
+        "n" -> return False
         _   ->
           do  liftIO $ putStr "Must type 'y' for yes or 'n' for no: "
-              withApproval task
+              getApproval
 
 
 
