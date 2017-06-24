@@ -10,10 +10,8 @@ import Control.Concurrent.Chan (Chan, newChan, readChan)
 import Control.Concurrent.MVar (newEmptyMVar, putMVar)
 import qualified System.Info as System
 import System.IO (hFlush, hPutStr, stdout)
-import Text.PrettyPrint.ANSI.Leijen
-  ( Doc, (<>), (<+>), displayIO, green, red, renderPretty, text
-  )
-
+import Text.PrettyPrint.ANSI.Leijen ((<>), (<+>))
+import qualified Text.PrettyPrint.ANSI.Leijen as P
 import qualified Elm.Package as Pkg
 import Elm.Package (Name, Version)
 
@@ -31,7 +29,7 @@ create :: IO Progress.Reporter
 create =
   do  chan <- newChan
       mvar <- newEmptyMVar
-      forkIO (loop chan (State 0 0 0) >>= putMVar mvar)
+      _ <- forkIO (loop chan (State 0 0 0) >>= putMVar mvar)
       return (Progress.makeReporter chan mvar)
 
 
@@ -150,39 +148,59 @@ loopHelp chan progress state@(State total good bad) =
             loop chan (State 0 0 0)
 
 
+    -- PUBLISH
+
+    PublishStart name version ->
+      do  putStrLn $ unwords [ "Verifying", Pkg.toString name, Pkg.versionToString version, "..."  ]
+          loop chan state
+
+    PublishEnd ->
+      do  putStrLn "Success!"
+          loop chan state
+
+
+    -- SOLVER
+
+    UnableToLoadLatestPackages ->
+      do  putStrLn ""
+          writeDoc $ P.dullyellow (P.text "WARNING:") <+> P.text "I normally check <https://package.elm-lang.org> for new packages"
+          putStrLn "here, but my request failed. Are you offline? I will try to continue anyway.\n"
+          loop chan state
+
+
 
 -- DOC HELPERS
 
 
-writeDoc :: Doc -> IO ()
+writeDoc :: P.Doc -> IO ()
 writeDoc doc =
-  displayIO stdout $ renderPretty 1 80 doc
+  P.displayIO stdout $ P.renderPretty 1 80 doc
 
 
-makeBullet :: Name -> Version -> Outcome -> Doc
+makeBullet :: Name -> Version -> Outcome -> P.Doc
 makeBullet name version outcome =
   let
     nm =
-      text (Pkg.toString name)
+      P.text (Pkg.toString name)
 
     vsn =
-      text (Pkg.versionToString version)
+      P.text (Pkg.versionToString version)
 
     bullet =
       case outcome of
-        Good -> good
-        Bad -> bad
+        Good -> goodBullet
+        Bad -> badBullet
   in
-    text "  " <> bullet <+> nm <+> vsn <> text "\n"
+    P.text "  " <> bullet <+> nm <+> vsn <> P.text "\n"
 
 
-good :: Doc
-good =
-  green $ text $
+goodBullet :: P.Doc
+goodBullet =
+  P.green $ P.text $
     if System.os == "windows" then "+" else "●"
 
 
-bad :: Doc
-bad =
-  red $ text $
+badBullet :: P.Doc
+badBullet =
+  P.red $ P.text $
     if System.os == "windows" then "X" else "✗"

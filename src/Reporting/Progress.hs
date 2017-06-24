@@ -66,5 +66,12 @@ data Progress
   | CompileFileEnd Module.Raw Outcome
   | CompileEnd
 
+  -- publish
+  | PublishStart Name Version
+  | PublishEnd
+
+  -- solver
+  | UnableToLoadLatestPackages
+
 
 data Outcome = Good | Bad
