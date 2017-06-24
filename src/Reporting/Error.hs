@@ -66,6 +66,7 @@ data Error
   | BadBump Version Version Magnitude Version Magnitude
 
   -- publish
+  | CannotPublishApp
   | PublishWithoutSummary
   | PublishWithoutExposed
 
