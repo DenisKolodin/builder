@@ -25,7 +25,6 @@ import qualified Network.HTTP.Client as Client
 import qualified Network.HTTP.Client.MultipartFormData as Multi
 import System.FilePath ((</>))
 
-import qualified Elm.Docs as Docs
 import Elm.Package (Name, Version)
 import qualified Elm.Package as Pkg
 import qualified Json.Decode as Decode
@@ -45,9 +44,9 @@ getElmJson name version =
     "packages/" ++ Pkg.toUrl name ++ "/" ++ Pkg.versionToString version ++ "/elm.json"
 
 
-getDocs :: Name -> Version -> Task.Task Docs.Documentation
+getDocs :: Name -> Version -> Task.Task LBS.ByteString
 getDocs name version =
-  Http.run $ fetchJson (Docs.toDict <$> Decode.list Docs.decoder) $
+  Http.run $ fetchByteString $
     "packages/" ++ Pkg.toUrl name ++ "/" ++ Pkg.versionToString version ++ "/docs.json"
 
 

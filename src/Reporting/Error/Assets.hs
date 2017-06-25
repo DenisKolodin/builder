@@ -28,7 +28,7 @@ data Error
   = BadElmJson JsonProblem
   | BadBuildPlan JsonProblem
   | CorruptElmJson Pkg.Name Pkg.Version
-  | CorruptDocumentation String
+  | CorruptDocumentation Pkg.Name Pkg.Version
   | CorruptVersionCache Pkg.Name
   | PackageNotFound Pkg.Name [Pkg.Name]
   | CorruptBinary FilePath
@@ -69,7 +69,7 @@ toDoc err =
         BadContent ->
           error "TODO bad elm-build-plan.json"
 
-    CorruptDocumentation problem ->
+    CorruptDocumentation name version ->
       Help.makeErrorDoc "CorruptDocumentation" [ text "TODO" ]
 
     CorruptVersionCache name ->

@@ -3,6 +3,7 @@ module Deps.Get
   ( all
   , Mode(..)
   , info
+  , docs
   )
   where
 
@@ -16,6 +17,7 @@ import Data.Map (Map)
 import qualified System.Directory as Dir
 import System.FilePath ((</>))
 
+import qualified Elm.Docs as Docs
 import Elm.Package (Name, Version)
 
 import qualified Deps.Website as Website
@@ -106,3 +108,31 @@ info name version =
         Left _ ->
           do  IO.remove elmJson
               Task.throw $ Error.Assets $ E.CorruptElmJson name version
+
+
+
+-- DOCS
+
+
+docs :: Name -> Version -> Task.Task Docs.Documentation
+docs name version =
+  do  dir <- Task.getPackageCacheDirFor name version
+      let docsJson = dir </> "docs.json"
+
+      exists <- liftIO $ Dir.doesFileExist docsJson
+
+      json <-
+        if exists
+          then liftIO (BS.readFile docsJson)
+          else
+            do  bits <- Website.getDocs name version
+                liftIO (BS.writeFile docsJson bits)
+                return bits
+
+      case Decode.parse (Docs.toDict <$> Decode.list Docs.decoder) json of
+        Right pkgInfo ->
+          return pkgInfo
+
+        Left _ ->
+          do  IO.remove docsJson
+              Task.throw $ Error.Assets $ E.CorruptDocumentation name version
