@@ -21,7 +21,7 @@ create :: IO Progress.Reporter
 create =
   do  chan <- newChan
       mvar <- newEmptyMVar
-      forkIO (loop chan >>= putMVar mvar)
+      _ <- forkIO (loop chan >>= putMVar mvar)
       return (Progress.makeReporter chan mvar)
 
 
