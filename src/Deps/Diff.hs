@@ -3,6 +3,9 @@
 module Deps.Diff
   ( diff
   , PackageChanges
+  , Magnitude(..)
+  , magnitudeToString
+  , toMagnitude
   , toDoc
   , bump
   )
@@ -294,22 +297,22 @@ data Magnitude
   deriving (Eq, Ord)
 
 
-magnitudeToDoc :: Magnitude -> P.Doc
-magnitudeToDoc magnitude =
+magnitudeToString :: Magnitude -> String
+magnitudeToString magnitude =
   case magnitude of
     PATCH ->
-      P.text "PATCH"
+      "PATCH"
 
     MINOR ->
-      P.text "MINOR"
+      "MINOR"
 
     MAJOR ->
-      P.text "MAJOR"
+      "MAJOR"
 
 
 bump :: PackageChanges -> Pkg.Version -> Pkg.Version
 bump changes version =
-  case packageChangeMagnitude changes of
+  case toMagnitude changes of
     PATCH ->
       Pkg.bumpPatch version
 
@@ -320,8 +323,8 @@ bump changes version =
       Pkg.bumpMajor version
 
 
-packageChangeMagnitude :: PackageChanges -> Magnitude
-packageChangeMagnitude (PackageChanges added changed removed) =
+toMagnitude :: PackageChanges -> Magnitude
+toMagnitude (PackageChanges added changed removed) =
   let
     addMag = if null added then PATCH else MINOR
     removeMag = if null removed then PATCH else MAJOR
@@ -360,7 +363,7 @@ toDoc changes@(PackageChanges added changed removed) =
   let
     header =
       P.text "This is a"
-      <+> magnitudeToDoc (packageChangeMagnitude changes)
+      <+> P.text (magnitudeToString (toMagnitude changes))
       <+> P.text "change."
 
     addedModules =
@@ -386,7 +389,7 @@ toHeaderDoc title magnitude =
   P.dullcyan (P.text "------")
   <+> P.text title
   <+> P.text "-"
-  <+> magnitudeToDoc magnitude
+  <+> P.text (magnitudeToString magnitude)
   <+> P.dullcyan (P.text (replicate (64 - length title) '-'))
 
 
