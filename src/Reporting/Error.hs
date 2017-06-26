@@ -21,6 +21,7 @@ import Elm.Package (Name, Version)
 
 import Elm.Project.Constraint (Constraint)
 import qualified Elm.Project.Constraint as Con
+import Deps.Diff (Magnitude)
 import qualified Reporting.Error.Assets as Asset
 import qualified Reporting.Error.Compile as Compile
 import qualified Reporting.Error.Crawl as Crawl
@@ -60,22 +61,17 @@ data Error
   | MissingTag Version
 
   -- bumps
+  | CannotBumpApp
   | AlreadyPublished Version
   | Unbumpable Version [Version]
   | InvalidBump Version Version
   | BadBump Version Version Magnitude Version Magnitude
+  | NotInitialVersion
 
   -- publish
   | CannotPublishApp
   | PublishWithoutSummary
   | PublishWithoutExposed
-
-
-data Magnitude
-    = PATCH
-    | MINOR
-    | MAJOR
-    deriving (Eq, Ord, Show)
 
 
 
@@ -232,14 +228,14 @@ toDoc err =
     BadBump old new magnitude realNew realMagnitude ->
       Help.makeErrorDoc
         ( "Your elm.json says the next version should be "
-          ++ Pkg.versionToString new ++ ", indicating a " ++ show magnitude
+          ++ Pkg.versionToString new ++ ", indicating a " ++ error "TODO magnitude" magnitude
           ++ " change to the public API. This does not match the API diff given by:"
         )
         [ P.indent 4 $ P.text $
             "elm-package diff " ++ Pkg.versionToString old
 
         , reflow $
-          "This command says this is a " ++ show realMagnitude
+          "This command says this is a " ++ error "TODO realMagnitude" realMagnitude
           ++ " change, so the next version should be "
           ++ Pkg.versionToString realNew
           ++ ". Double check everything to make sure you are publishing what you want!"
