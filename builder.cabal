@@ -42,6 +42,7 @@ Library
         src
 
     exposed-modules:
+        Elm.Bump,
         Elm.Install,
         Elm.PerUserCache,
         Elm.Project,

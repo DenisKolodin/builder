@@ -23,16 +23,14 @@ publish (Summary _ project _ _ _) =
     Project.App _ _ ->
       Task.throw Error.CannotPublishApp
 
-    Project.Pkg (Project.PkgInfo name summary _ version exposed _ _ _ _ _) ->
+    Project.Pkg info@(Project.PkgInfo name summary _ version exposed _ _ _ _ _) ->
       do
           Task.report (Progress.PublishStart name version)
 
           when (null exposed)      $ Task.throw Error.PublishWithoutExposed
           when (isSummary summary) $ Task.throw Error.PublishWithoutSummary
 
-          docs <- Docs.generate name
-
-          verifyVersion name version docs
+          Bump.validate root info
           commitHash <- verifyTag name version
 
           Website.register name version commitHash
@@ -43,29 +41,6 @@ publish (Summary _ project _ _ _) =
 isSummary :: Text -> Bool
 isSummary summary =
   error "TODO check summary is not default, not empty, etc."
-
-
-verifyVersion :: Pkg.Name -> Pkg.Version -> Docs.Documentation -> Task.Task ()
-verifyVersion name version docs =
-  do  allPackages <- Get.all Get.RequireLatest
-
-      validity <-
-        case Map.lookup name allPackages of
-          Just publishedVersions ->
-            Bump.validateVersion docs name version publishedVersions
-
-          Nothing ->
-            Bump.validateInitialVersion description
-
-      case validity of
-        Bump.Valid ->
-          return ()
-
-        Bump.Invalid ->
-          Task.throw Error.VersionInvalid
-
-        Bump.Changed _ ->
-          Task.throw Error.VersionJustChanged
 
 
 verifyTag :: Pkg.Name -> Pkg.Version -> Task.Task String
