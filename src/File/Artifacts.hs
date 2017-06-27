@@ -1,6 +1,7 @@
 module File.Artifacts
   ( ignore
   , write
+  , writeDocs
   )
   where
 
@@ -9,11 +10,15 @@ import Control.Concurrent.MVar (newEmptyMVar, putMVar, readMVar)
 import Control.Monad (foldM, void)
 import Control.Monad.Except (liftIO)
 import qualified Data.Binary as Binary
-import qualified Data.Map as Map
 import Data.Map (Map)
+import qualified Data.Map as Map
+import qualified Data.Maybe as Maybe
+import System.FilePath ((</>))
 
 import qualified Elm.Compiler as Compiler
 import qualified Elm.Compiler.Module as Module
+import qualified Elm.Docs as Docs
+import qualified Json.Encode as Encode
 
 import File.Compile (Answer(..))
 import qualified Reporting.Error.Compile as E
@@ -39,19 +44,34 @@ ignore answers =
 -- WRITE
 
 
-write :: Map Module.Raw Answer -> Task.Task (Map Module.Raw Compiler.Result)
-write answers =
+write :: FilePath -> Map Module.Raw Answer -> Task.Task (Map Module.Raw Compiler.Result)
+write root answers =
   let
     writer name result@(Compiler.Result _ ifaces objs) =
       do  mvar <- newEmptyMVar
           void $ forkIO $
-            do  Binary.encodeFile (Paths.elmi name) ifaces
-                Binary.encodeFile (Paths.elmo name) objs
+            do  Binary.encodeFile (Paths.elmi root name) ifaces
+                Binary.encodeFile (Paths.elmo root name) objs
                 putMVar mvar result
           return mvar
   in
     do  mvars <- gather writer answers
         liftIO $ traverse readMVar mvars
+
+
+writeDocs :: FilePath -> Map Module.Raw Compiler.Result -> Task.Task ()
+writeDocs root results =
+  let
+    getDocs (Compiler.Result docs _ _) =
+      docs
+  in
+    case Maybe.mapMaybe getDocs (Map.elems results) of
+      [] ->
+        return ()
+
+      docs ->
+        liftIO $ Encode.write (root </> "docs.json") $
+          Encode.list Docs.encode docs
 
 
 
