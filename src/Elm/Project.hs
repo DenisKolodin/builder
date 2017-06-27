@@ -43,13 +43,12 @@ getRootWithReplFallback =
 
 
 compile :: Summary -> [FilePath] -> Task.Task ()
-compile summary paths =
+compile summary@(Summary.Summary root project _ _ _) paths =
   do  args <- Args.fromPaths summary paths
       graph <- Crawl.crawl summary args
       (dirty, ifaces) <- Plan.plan summary graph
-      let project = Summary._project summary
       answers <- Compile.compile project ifaces dirty
-      results <- Artifacts.write answers
+      results <- Artifacts.write root answers
       Output.generate summary graph
 
 
@@ -59,12 +58,11 @@ compile summary paths =
 
 compileForRepl :: Text -> Maybe String -> Task.Task (Maybe FilePath)
 compileForRepl source maybeName =
-  do  summary <- getRoot
+  do  summary@(Summary.Summary root project _ _ _) <- getRoot
       graph <- Crawl.crawlFromSource summary source
       (dirty, ifaces) <- Plan.plan summary graph
-      let project = Summary._project summary
       answers <- Compile.compile project ifaces dirty
-      results <- Artifacts.write answers
+      results <- Artifacts.write root answers
       case maybeName of
         Nothing ->
           return Nothing
