@@ -3,6 +3,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Reporting.Task.Http
   ( Fetch
+  , Handler
   , run
   , package
   , anything
