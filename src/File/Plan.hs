@@ -16,7 +16,6 @@ import qualified Data.Map as Map
 import qualified Data.Text as Text
 import qualified Data.Time.Clock as Time
 import qualified System.Directory as Dir
-import System.FilePath ((</>))
 
 import qualified Elm.Compiler.Module as Module
 import qualified Elm.Package as Pkg
@@ -98,7 +97,7 @@ getStatus env statusMVars foreigns name (Header.Info path time src deps) =
         do  statuses <- readMVar statusMVars
             info <- foldM (addDep statuses foreigns) (Info path src [] [] []) deps
 
-            let elmi = _root env </> Stuff.Paths.elmi name
+            let elmi = Stuff.Paths.elmi (_root env) name
 
             case _dirty info of
               _ : _ ->

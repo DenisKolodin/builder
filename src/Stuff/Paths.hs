@@ -1,6 +1,8 @@
+{-# OPTIONS_GHC -Wall #-}
 module Stuff.Paths
   ( solution
   , summary
+  , prepublishDir
   , removeStuff
   , elmi
   , elmo
@@ -24,6 +26,11 @@ import qualified Reporting.Task as Task
 -- PATHS
 
 
+stuff :: FilePath
+stuff =
+  "elm-stuff" </> Pkg.versionToString Compiler.version
+
+
 solution :: FilePath
 solution =
   stuff </> "solution.dat"
@@ -34,9 +41,9 @@ summary =
   stuff </> "summary.dat"
 
 
-stuff :: FilePath
-stuff =
-  "elm-stuff" </> Pkg.versionToString Compiler.version
+prepublishDir :: FilePath
+prepublishDir  =
+  stuff </> "prepublish"
 
 
 
@@ -57,19 +64,19 @@ removeStuff root =
 -- ELMI and ELMO
 
 
-elmi :: Module.Raw -> FilePath
-elmi name =
-  toArtifactPath name "elmi"
+elmi :: FilePath -> Module.Raw -> FilePath
+elmi root name =
+  toArtifactPath root name "elmi"
 
 
-elmo :: Module.Raw -> FilePath
-elmo name =
-  toArtifactPath name "elmo"
+elmo :: FilePath -> Module.Raw -> FilePath
+elmo root name =
+  toArtifactPath root name "elmo"
 
 
-toArtifactPath :: Module.Raw -> String -> FilePath
-toArtifactPath name ext =
-  stuff </> Text.unpack (Module.hyphenate name) <.> ext
+toArtifactPath :: FilePath -> Module.Raw -> String -> FilePath
+toArtifactPath root name ext =
+  root </> stuff </> Text.unpack (Module.hyphenate name) <.> ext
 
 
 

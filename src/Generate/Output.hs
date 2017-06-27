@@ -89,15 +89,15 @@ generateReplFile summary@(Summary.Summary _ project _ _ _) graph output =
 
 
 organize :: Summary.Summary -> Crawl.Graph () -> Task.Task Obj.Graph
-organize (Summary.Summary _ _ _ _ deps) (Crawl.Graph _ locals _ _ _) =
-  do  localObjs <- Obj.unions <$> traverse loadModuleObj (Map.keys locals)
+organize (Summary.Summary root _ _ _ deps) (Crawl.Graph _ locals _ _ _) =
+  do  localObjs <- Obj.unions <$> traverse (loadModuleObj root) (Map.keys locals)
       foreignObjs <- Obj.unions <$> traverse loadPackageObj (Map.toList deps)
       return (Obj.union localObjs foreignObjs)
 
 
-loadModuleObj :: Module.Raw -> Task.Task Obj.Graph
-loadModuleObj name =
-  IO.readBinary (Paths.elmo name)
+loadModuleObj :: FilePath -> Module.Raw -> Task.Task Obj.Graph
+loadModuleObj root name =
+  IO.readBinary (Paths.elmo root name)
 
 
 loadPackageObj :: ( Pkg.Name, (Pkg.Version, deps) ) -> Task.Task Obj.Graph
