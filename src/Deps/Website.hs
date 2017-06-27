@@ -6,6 +6,9 @@ module Deps.Website
   , getNewPackages
   , getAllPackages
   , download
+  , githubCommit
+  , githubDownload
+  , Sha
   , register
   )
   where
@@ -23,7 +26,8 @@ import qualified Data.Map as Map
 import qualified Data.Text as Text
 import qualified Network.HTTP.Client as Client
 import qualified Network.HTTP.Client.MultipartFormData as Multi
-import System.FilePath ((</>))
+import qualified System.Directory as Dir
+import System.FilePath ((</>), splitFileName)
 
 import Elm.Package (Name, Version)
 import qualified Elm.Package as Pkg
@@ -32,6 +36,7 @@ import qualified Json.Decode as Decode
 import qualified Reporting.Progress as Progress
 import qualified Reporting.Task as Task
 import qualified Reporting.Task.Http as Http
+import qualified Stuff.Paths as Path
 
 
 
@@ -112,7 +117,12 @@ fetchByteString path =
 
 fetchJson :: Decode.Decoder a -> String -> Http.Fetch a
 fetchJson decoder path =
-  Http.package path [] $ \request manager ->
+  Http.package path [] (jsonHandler decoder)
+
+
+jsonHandler :: Decode.Decoder a -> Http.Handler a
+jsonHandler decoder =
+  \request manager ->
     do  response <- Client.httpLbs request manager
         case Decode.parse decoder (Client.responseBody response) of
           Right value ->
@@ -155,7 +165,7 @@ downloadHelp cache (name, version) =
       in
         Http.report start toEnd $
           Http.anything endpoint $ \request manager ->
-            Client.withResponse request manager (writeArchive cache name version hash)
+            Client.withResponse request manager (downloadArchive cache name version hash)
 
 
 endpointDecoder :: Decode.Decoder (String, String)
@@ -166,60 +176,72 @@ endpointDecoder =
 
 
 
--- WRITE ZIP ARCHIVE
+-- DOWNLOAD ZIP ARCHIVE
 
 
-writeArchive :: FilePath -> Name -> Version -> String -> Client.Response Client.BodyReader -> IO (Either String ())
-writeArchive cache name version hash response =
-  writeArchiveHelp
-    (WE cache name version hash (Client.responseBody response))
-    (WS 0 SHA.sha1Incremental (Binary.runGetIncremental Binary.get))
+downloadArchive :: FilePath -> Name -> Version -> String -> Client.Response Client.BodyReader -> IO (Either String ())
+downloadArchive cache name version expectedHash response =
+  do  result <- readArchive (Client.responseBody response) initialArchiveState
+      case result of
+        Left msg ->
+          return (Left msg)
+
+        Right (sha, archive) ->
+          if expectedHash == SHA.showDigest sha then
+            Right <$> writeArchive archive (cache </> Pkg.toFilePath name) (Pkg.versionToString version)
+          else
+            return $ Left $
+              "Expecting hash of content to be " ++ expectedHash
+              ++ ", but it is " ++ SHA.showDigest sha
 
 
-data WriteEnv =
-  WE
-    { _cache :: FilePath
-    , _name :: Name
-    , _version :: Version
-    , _hash :: String
-    , _body :: Client.BodyReader
-    }
+
+-- READ ARCHIVE
 
 
-data WriteState =
-  WS
+data ArchiveState =
+  AS
     { _len :: !Int
     , _sha :: !(Binary.Decoder SHA.SHA1State)
     , _zip :: !(Binary.Decoder Zip.Archive)
     }
 
 
-writeArchiveHelp :: WriteEnv -> WriteState -> IO (Either String ())
-writeArchiveHelp env@(WE cache name version hash body) (WS len sha zip) =
+initialArchiveState :: ArchiveState
+initialArchiveState =
+  AS 0 SHA.sha1Incremental (Binary.runGetIncremental Binary.get)
+
+
+type Sha = SHA.Digest SHA.SHA1State
+
+
+readArchive :: Client.BodyReader -> ArchiveState -> IO (Either String (Sha, Zip.Archive))
+readArchive body (AS len sha zip) =
   case zip of
     Binary.Fail _ _ _ ->
       return $ Left "seems like the .zip is corrupted"
 
     Binary.Partial k ->
       do  chunk <- Client.brRead body
-          writeArchiveHelp env $ WS
+          readArchive body $ AS
             { _len = len + BS.length chunk
             , _sha = Binary.pushChunk sha chunk
             , _zip = k (if BS.null chunk then Nothing else Just chunk)
             }
 
     Binary.Done _ _ archive ->
-      let
-        realHash =
-          SHA.showDigest (SHA.completeSha1Incremental sha len)
-      in
-        if hash /= realHash then
-          return $ Left $ "Expecting hash of content to be " ++ hash ++ ", but it is " ++ realHash
-        else
-          do  let opts = [Zip.OptDestination (cache </> Pkg.toFilePath name)]
-              let vsn = Pkg.versionToString version
-              let entries = map (replaceRoot vsn) (Zip.zEntries archive)
-              Right <$> mapM_ (Zip.writeEntry opts) entries
+      return $ Right ( SHA.completeSha1Incremental sha len, archive )
+
+
+
+-- WRITE ARCHIVE
+
+
+writeArchive :: Zip.Archive -> FilePath -> FilePath -> IO ()
+writeArchive archive destination newRoot =
+  do  Dir.createDirectoryIfMissing True destination
+      let opts = [Zip.OptDestination destination]
+      mapM_ (Zip.writeEntry opts . replaceRoot newRoot) (Zip.zEntries archive)
 
 
 replaceRoot :: String -> Zip.Entry -> Zip.Entry
@@ -232,10 +254,51 @@ replaceRoot root entry =
 
 
 
+-- FIND TAGGED COMMIT ON GITHUB
+
+
+githubCommit :: Name -> Version -> Task.Task String
+githubCommit name version =
+  let
+    endpoint =
+      "https://api.github.com/repos/" ++ Pkg.toUrl name ++ "/git/refs/tags/" ++ Pkg.versionToString version
+  in
+    Http.run $ Http.anything endpoint $
+      jsonHandler (Decode.at ["object","sha"] Decode.string)
+
+
+
+-- DOWNLOAD FROM GITHUB
+
+
+githubDownload :: Name -> Version -> Task.Task Sha
+githubDownload name version =
+  let
+    endpoint =
+      "https://api.github.com/repos/" ++ Pkg.toUrl name ++ "/git/refs/tags/" ++ Pkg.versionToString version
+  in
+    Http.run $ Http.anything endpoint $ \request manager ->
+      Client.withResponse request manager githubDownloadHelp
+
+
+githubDownloadHelp :: Client.Response Client.BodyReader -> IO (Either String Sha)
+githubDownloadHelp response =
+  do  result <- readArchive (Client.responseBody response) initialArchiveState
+      case result of
+        Left msg ->
+          return (Left msg)
+
+        Right (sha, archive) ->
+          do  let (dir, root) = splitFileName Path.prepublishDir
+              writeArchive archive dir root
+              return $ Right sha
+
+
+
 -- REGISTER PACKAGES
 
 
-register :: Name -> Version -> String -> SHA.Digest SHA.SHA1State -> Task.Task ()
+register :: Name -> Version -> String -> Sha -> Task.Task ()
 register name version commitHash digest =
   let
     params =
@@ -255,5 +318,4 @@ register name version commitHash digest =
       do  requestWithBody <- Multi.formDataBody files rawRequest
           let request = requestWithBody { Client.responseTimeout = Nothing }
           void $ Client.httpLbs request manager
-          return (Right ())
-
+          return $ Right ()
