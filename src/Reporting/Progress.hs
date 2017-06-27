@@ -5,6 +5,7 @@ module Reporting.Progress
   , Msg(..)
   , Progress(..)
   , Outcome(..)
+  , PublishPhase(..)
   )
   where
 
@@ -12,6 +13,7 @@ module Reporting.Progress
 import Control.Concurrent.Chan (Chan, writeChan)
 import Control.Concurrent.MVar (MVar, readMVar)
 import qualified Elm.Compiler.Module as Module
+import Deps.Diff (Magnitude)
 import Elm.Package (Name, Version)
 import Reporting.Error (Error)
 
@@ -68,6 +70,7 @@ data Progress
 
   -- publish
   | PublishStart Name Version
+  | PublishProgress PublishPhase (Maybe Outcome)
   | PublishEnd
 
   -- solver
@@ -75,3 +78,11 @@ data Progress
 
 
 data Outcome = Good | Bad
+
+
+data PublishPhase
+  = CheckVersion Version Version Magnitude
+  | CheckTag Version
+  | CheckDownload
+  | CheckBuild
+  | CheckChanges

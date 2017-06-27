@@ -15,8 +15,9 @@ import qualified Text.PrettyPrint.ANSI.Leijen as P
 import qualified Elm.Package as Pkg
 import Elm.Package (Name, Version)
 
+import qualified Deps.Diff as Diff
 import qualified Reporting.Error as Error
-import Reporting.Progress ( Msg(..), Progress(..), Outcome(..) )
+import Reporting.Progress (Msg(..), Progress(..), Outcome(..), PublishPhase(..))
 import qualified Reporting.Progress as Progress
 import qualified Reporting.Progress.Bar as Bar
 
@@ -154,8 +155,12 @@ loopHelp chan progress state@(State total good bad) =
       do  putStrLn $ unwords [ "Verifying", Pkg.toString name, Pkg.versionToString version, "..."  ]
           loop chan state
 
+    PublishProgress phase status ->
+      do  writeDoc $ toChecklistDoc phase status
+          loop chan state
+
     PublishEnd ->
-      do  putStrLn "Success!"
+      do  putStrLn "\n\nSuccess!"
           loop chan state
 
 
@@ -177,6 +182,10 @@ writeDoc doc =
   P.displayIO stdout $ P.renderPretty 1 80 doc
 
 
+
+-- BULLETS
+
+
 makeBullet :: Name -> Version -> Outcome -> P.Doc
 makeBullet name version outcome =
   let
@@ -188,19 +197,110 @@ makeBullet name version outcome =
 
     bullet =
       case outcome of
-        Good -> goodBullet
-        Bad -> badBullet
+        Good -> goodMark
+        Bad -> badMark
   in
-    P.text "  " <> bullet <+> nm <+> vsn <> P.text "\n"
+    P.indent 2 $ bullet <+> nm <+> vsn <> P.text "\n"
 
 
-goodBullet :: P.Doc
-goodBullet =
+goodMark :: P.Doc
+goodMark =
   P.green $ P.text $
     if System.os == "windows" then "+" else "●"
 
 
-badBullet :: P.Doc
-badBullet =
+badMark :: P.Doc
+badMark =
   P.red $ P.text $
     if System.os == "windows" then "X" else "✗"
+
+
+
+-- CHECKLIST
+
+
+toChecklistDoc :: PublishPhase -> Maybe Outcome -> P.Doc
+toChecklistDoc phase status =
+  let
+    (ChecklistMessages waiting success failure) =
+      toChecklistMessages phase
+
+    padded message =
+      message ++ replicate (length waiting - length message) ' '
+  in
+    case status of
+      Nothing ->
+        P.text "  " <> waitingMark <+> P.text waiting
+
+      Just Good ->
+        P.text "\r  " <> successMark <+> P.text (padded success ++ "\n")
+
+      Just Bad ->
+        P.text "\r  " <> failureMark <+> P.text (padded failure ++ "\n")
+
+
+waitingMark :: P.Doc
+waitingMark =
+  P.dullyellow $ P.text "☐"
+
+
+successMark :: P.Doc
+successMark =
+  P.green $ P.text "☑"
+
+
+failureMark :: P.Doc
+failureMark =
+  P.red $ P.text "☒"
+
+
+data ChecklistMessages =
+  ChecklistMessages
+    { _waiting :: String
+    , _success :: String
+    , _failure :: String
+    }
+
+
+toChecklistMessages :: PublishPhase -> ChecklistMessages
+toChecklistMessages phase =
+  case phase of
+    CheckVersion old new magnitude ->
+      ChecklistMessages
+        ("Checking semantic versioning rules. Is " ++ Pkg.versionToString new ++ " correct?")
+        (toCheckVersionSuccessMessage old new magnitude)
+        ("Version " ++ Pkg.versionToString new ++ " is not correct!")
+
+    CheckTag version ->
+      ChecklistMessages
+        ("Is version " ++ Pkg.versionToString version ++ " tagged on GitHub?")
+        ("Version " ++ Pkg.versionToString version ++ " is tagged on GitHub")
+        ("Version " ++ Pkg.versionToString version ++ " is not tagged on GitHub!")
+
+    CheckDownload ->
+      ChecklistMessages
+        "Downloading code from GitHub..."
+        "Code downloaded successfully from GitHub"
+        "Could not download code from GitHub!"
+
+    CheckBuild ->
+      ChecklistMessages
+        "Building downloaded code and generated docs..."
+        "Downloaded code compiles successfully / docs generated"
+        "Cannot compile downloaded code!"
+
+    CheckChanges ->
+      ChecklistMessages
+        "Checking for uncommitted changes..."
+        "No uncommitted changes in local code"
+        "Your local code is different than the code tagged on GitHub"
+
+
+toCheckVersionSuccessMessage :: Pkg.Version -> Pkg.Version -> Diff.Magnitude -> String
+toCheckVersionSuccessMessage oldVersion newVersion magnitude =
+  let
+    old = Pkg.versionToString oldVersion
+    new = Pkg.versionToString newVersion
+    mag = Diff.magnitudeToString magnitude
+  in
+    "Version number " ++ new ++ " verified (" ++ mag ++ " change, " ++ old ++ " => " ++ new ++ ")"
