@@ -9,6 +9,7 @@ module Reporting.Task
   , getReporter
   , withApproval
   , getApproval
+  , silently
   , getSilentRunner
   , workerChan
   , runHttp
@@ -140,6 +141,13 @@ getApproval =
 
 
 -- RUNNER
+
+
+silently :: Task_ e a -> Task_ e a
+silently task =
+  do  runner <- getSilentRunner
+      result <- liftIO (runner task)
+      either throw return result
 
 
 getSilentRunner :: Task_ x (Task_ e a -> IO (Either e a))
