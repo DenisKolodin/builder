@@ -3,24 +3,23 @@ module Elm.Publish (publish) where
 
 
 import Control.Monad (when)
-import Control.Monad.Except (catchError)
-import Control.Monad.Trans (liftIO)
+import Control.Monad.Except (catchError, runExceptT)
+import Control.Monad.Trans (liftIO, lift)
+import qualified Data.List as List
+import qualified Data.Map as Map
 import qualified Data.Text as Text
 import qualified System.Directory as Dir
 import qualified System.Exit as Exit
 import qualified System.Process as Process
 
+import qualified Deps.Diff as Diff
+import qualified Deps.Get as Get
 import qualified Deps.Website as Website
 import qualified Elm.Bump as Bump
 import qualified Elm.Package as Pkg
 import qualified Elm.Project as Project
 import qualified Elm.Project.Json as Project
 import qualified Elm.Project.Summary as Summary
-import qualified File.Args as Args
-import qualified File.Artifacts as Artifacts
-import qualified File.Compile as Compile
-import qualified File.Crawl as Crawl
-import qualified File.Plan as Plan
 import qualified Reporting.Error as Error
 import qualified Reporting.Progress as Progress
 import qualified Reporting.Task as Task
@@ -32,31 +31,34 @@ import qualified Stuff.Paths as Path
 
 
 publish :: Summary.Summary -> Task.Task ()
-publish (Summary.Summary root project _ _ _) =
+publish summary@(Summary.Summary _ project _ _ _) =
   case project of
     Project.App _ _ ->
       Task.throw Error.CannotPublishApp
 
-    Project.Pkg info@(Project.PkgInfo name summary _ version exposed _ _ _ _) ->
+    Project.Pkg (Project.PkgInfo name smry _ version exposed _ _ _ _) ->
       do
-          Task.report (Progress.PublishStart name version)
+          allPackages <- Get.all Get.RequireLatest
+          let maybePublishedVersions = Map.lookup name allPackages
 
-          when (null exposed)      $ Task.throw Error.PublishWithoutExposed
-          when (isSummary summary) $ Task.throw Error.PublishWithoutSummary
+          Task.report (Progress.PublishStart name version maybePublishedVersions)
 
-          Bump.validate root info
+          when (null exposed)    $ Task.throw Error.PublishWithoutExposed
+          when (badSummary smry) $ Task.throw Error.PublishWithoutSummary
+
+          verifyVersion summary name version maybePublishedVersions
           commitHash <- verifyTag name version
           verifyNoChanges commitHash
-          zipHash <- verifyZip root name version
+          zipHash <- verifyZip name version
 
           Website.register name version commitHash zipHash
 
           Task.report Progress.PublishEnd
 
 
-isSummary :: Text.Text -> Bool
-isSummary summary =
-  error "TODO check summary is not default, not empty, etc."
+badSummary :: Text.Text -> Bool
+badSummary summary =
+  Text.null summary || Project.defaultSummary == summary
 
 
 verifyTag :: Pkg.Name -> Pkg.Version -> Task.Task String
@@ -81,27 +83,26 @@ verifyNoChanges commitHash =
             Task.throw (error "TODO local modules do not match")
 
 
-verifyZip :: FilePath -> Pkg.Name -> Pkg.Version -> Task.Task Website.Sha
-verifyZip root name version =
-  do  hash <- phase Progress.CheckDownload $
-        Website.githubDownload name version
+verifyZip :: Pkg.Name -> Pkg.Version -> Task.Task Website.Sha
+verifyZip name version =
+  withTempDir $ \dir ->
+    do  hash <- phase Progress.CheckDownload $
+          Website.githubDownload name version dir
 
-      phase Progress.CheckBuild $ inPrepublishDir $
-        do  summary@(Summary.Summary _ project _ _ _) <- Project.getRoot
-            args <- Args.fromSummary summary
-            graph <- Crawl.crawl summary args
-            (dirty, cachedIfaces) <- Plan.plan summary graph
-            answers <- Compile.compile project cachedIfaces dirty
-            results <- Artifacts.ignore answers
-            Artifacts.writeDocs root results
+        phase Progress.CheckBuild $
+          do  runner <- Task.getSilentRunner
+              result <- liftIO $ Dir.withCurrentDirectory dir $ runner $
+                Task.silently $ Project.generateDocs =<< Project.getRoot
+              either Task.throw (\_ -> return ()) result
 
-      return hash
+        return hash
 
 
-inPrepublishDir :: Task.Task a -> Task.Task a
-inPrepublishDir task =
-  do  runner <- Task.getSilentRunner
-      result <- liftIO $ Dir.withCurrentDirectory Path.prepublishDir (runner task)
+withTempDir :: (FilePath -> Task.Task a) -> Task.Task a
+withTempDir callback =
+  do  liftIO $ Dir.createDirectoryIfMissing True Path.prepublishDir
+      result <- lift $ runExceptT $ callback Path.prepublishDir
+      liftIO $ Dir.removeDirectoryRecursive Path.prepublishDir
       either Task.throw return result
 
 
@@ -120,3 +121,59 @@ phase publishPhase task =
       Task.report $ Progress.PublishProgress publishPhase (Just Progress.Good)
 
       return result
+
+
+
+-- VERIFY VERSION
+
+
+verifyVersion :: Summary.Summary -> Pkg.Name -> Pkg.Version -> Maybe [Pkg.Version] -> Task.Task ()
+verifyVersion summary name version maybePublishedVersions =
+  let
+    reportBumpPhase bumpPhase =
+      Task.report $ Progress.PublishCheckBump version bumpPhase
+  in
+  do  reportBumpPhase Progress.StatedVersion
+      case maybePublishedVersions of
+        Nothing ->
+          if version == Pkg.initialVersion then
+            reportBumpPhase Progress.GoodStart
+          else
+            Task.throw Error.NotInitialVersion
+
+        Just publishedVersions ->
+          if elem version publishedVersions then
+            Task.throw $ Error.AlreadyPublished version
+          else
+            do  (old, magnitude) <- verifyBump summary name version publishedVersions
+                reportBumpPhase (Progress.GoodBump old magnitude)
+
+  `catchError` \err ->
+    do  reportBumpPhase Progress.BadBump
+        Task.throw err
+
+
+verifyBump :: Summary.Summary -> Pkg.Name -> Pkg.Version -> [Pkg.Version] -> Task.Task (Pkg.Version, Diff.Magnitude)
+verifyBump summary name statedVersion publishedVersions =
+  let
+    possibleBumps =
+      Bump.toPossibleBumps publishedVersions
+
+    isTheBump (_ ,new, _) =
+      statedVersion == new
+  in
+  case List.find isTheBump possibleBumps of
+    Nothing ->
+      Task.throw $ Error.InvalidBump statedVersion (last publishedVersions)
+
+    Just (old, new, magnitude) ->
+      do  oldDocs <- Get.docs name old
+          newDocs <- Task.silently (Project.generateDocs summary)
+          let changes = Diff.diff oldDocs newDocs
+          let realNew = Diff.bump changes old
+          if new == realNew
+            then
+              return (old, magnitude)
+            else
+              Task.throw $ Error.BadBump old new magnitude realNew $
+                Diff.toMagnitude changes

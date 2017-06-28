@@ -1,7 +1,7 @@
 {-# OPTIONS_GHC -Wall #-}
 module Elm.Bump
   ( bump
-  , validate
+  , toPossibleBumps
   )
   where
 
@@ -13,9 +13,11 @@ import qualified Data.Map as Map
 import qualified Deps.Diff as Diff
 import qualified Deps.Get as Get
 import qualified Elm.Package as Pkg
+import qualified Elm.Project as Project
 import qualified Elm.Project.Json as Project
 import qualified Elm.Project.Summary as Summary
 import qualified Reporting.Error as Error
+import qualified Reporting.Progress.Terminal as Terminal
 import qualified Reporting.Task as Task
 
 
@@ -24,7 +26,7 @@ import qualified Reporting.Task as Task
 
 
 bump :: Summary.Summary -> Task.Task ()
-bump (Summary.Summary root project _ _ _) =
+bump summary@(Summary.Summary root project _ _ _) =
   case project of
     Project.App _ _ ->
       Task.throw Error.CannotBumpApp
@@ -33,15 +35,15 @@ bump (Summary.Summary root project _ _ _) =
       do  packages <- Get.all Get.RequireLatest
           case Map.lookup name packages of
             Nothing ->
-              bumpNewPackage root info
+              checkNewPackage root info
 
             Just publishedVersions ->
               let
                 bumpableVersions =
-                  map (\(old, _, _) -> old) (validBumps publishedVersions)
+                  map (\(old, _, _) -> old) (toPossibleBumps publishedVersions)
               in
                 if elem version bumpableVersions then
-                  suggestVersion root info
+                  suggestVersion summary info
                 else
                   Task.throw $ Error.Unbumpable version $
                     map head (List.group (List.sort bumpableVersions))
@@ -51,8 +53,8 @@ bump (Summary.Summary root project _ _ _) =
 -- VALID BUMPS
 
 
-validBumps :: [Pkg.Version] -> [(Pkg.Version, Pkg.Version, Diff.Magnitude)]
-validBumps publishedVersions =
+toPossibleBumps :: [Pkg.Version] -> [(Pkg.Version, Pkg.Version, Diff.Magnitude)]
+toPossibleBumps publishedVersions =
   let
     patchPoints =
       Pkg.filterLatest Pkg.majorAndMinor publishedVersions
@@ -69,13 +71,29 @@ validBumps publishedVersions =
 
 
 
+-- CHECK NEW PACKAGE
+
+
+checkNewPackage :: FilePath -> Project.PkgInfo -> Task.Task ()
+checkNewPackage root info@(Project.PkgInfo _ _ _ version _ _ _ _ _) =
+  do  liftIO $ putStrLn Terminal.newPackageOverview
+      if version == Pkg.initialVersion
+        then
+          liftIO $ putStrLn "The version number in elm.json is correct so you are all set!"
+        else
+          changeVersion root info Pkg.initialVersion $
+            "It looks like the version in elm.json has been changed though!\n\
+            \Would you like me to change it back to " ++ Pkg.versionToString Pkg.initialVersion ++ "? [Y/n] "
+
+
+
 -- SUGGEST VERSION
 
 
-suggestVersion :: FilePath -> Project.PkgInfo -> Task.Task ()
-suggestVersion root info@(Project.PkgInfo name _ _ version _ _ _ _ _) =
+suggestVersion :: Summary.Summary -> Project.PkgInfo -> Task.Task ()
+suggestVersion summary@(Summary.Summary root _ _ _ _) info@(Project.PkgInfo name _ _ version _ _ _ _ _) =
   do  oldDocs <- Get.docs name version
-      newDocs <- error "TODO Compile.toDocs"
+      newDocs <- Task.silently (Project.generateDocs summary)
       let changes = Diff.diff oldDocs newDocs
       let newVersion = Diff.bump changes version
       changeVersion root info newVersion $
@@ -110,92 +128,3 @@ changeVersion root info targetVersion explanation =
 
               liftIO $ putStrLn $
                 "Version changed to " ++ Pkg.versionToString targetVersion ++ "!"
-
-
-
--- VALIDATE
-
-
-validate :: FilePath -> Project.PkgInfo -> Task.Task ()
-validate root info@(Project.PkgInfo name _ _ version _ _ _ _ _) =
-  do  allPackages <- Get.all Get.RequireLatest
-      case Map.lookup name allPackages of
-        Just publishedVersions ->
-          validateNewVersion name version publishedVersions
-
-        Nothing ->
-          validateNewPackage root info
-
-
-validateNewVersion :: Pkg.Name -> Pkg.Version -> [Pkg.Version] -> Task.Task ()
-validateNewVersion name statedVersion publishedVersions =
-  case List.find (\(_ ,new, _) -> statedVersion == new) (validBumps publishedVersions) of
-    Nothing ->
-      if elem statedVersion publishedVersions then
-        Task.throw $ Error.AlreadyPublished statedVersion
-
-      else
-        Task.throw $ Error.InvalidBump statedVersion (last publishedVersions)
-
-    Just (old, new, magnitude) ->
-      do  oldDocs <- Get.docs name old
-          newDocs <- error "TODO Compile.toDocs"
-          let changes = Diff.diff oldDocs newDocs
-          let realNew = Diff.bump changes old
-          if new == realNew
-            then
-              do  let oldVsn = Pkg.versionToString old
-                  let newVsn = Pkg.versionToString new
-                  let mag = Diff.magnitudeToString magnitude
-                  liftIO $ putStrLn $
-                    "Version number " ++ newVsn ++ " verified (" ++ mag
-                    ++ " change, " ++ oldVsn ++ " => " ++ newVsn ++ ")"
-
-            else
-              Task.throw $ Error.BadBump old new magnitude realNew $
-                Diff.toMagnitude changes
-
-
-
--- CHECK NEW PACKAGE
-
-
-validateNewPackage :: FilePath -> Project.PkgInfo -> Task.Task ()
-validateNewPackage root info@(Project.PkgInfo _ _ _ version _ _ _ _ _) =
-  do  liftIO $ putStrLn newPackageOverview
-      if version == Pkg.initialVersion
-        then
-          liftIO $ putStrLn "The version number in elm.json is correct!"
-        else
-          Task.throw Error.NotInitialVersion
-
-
-bumpNewPackage :: FilePath -> Project.PkgInfo -> Task.Task ()
-bumpNewPackage root info@(Project.PkgInfo _ _ _ version _ _ _ _ _) =
-  do  liftIO $ putStrLn newPackageOverview
-      if version == Pkg.initialVersion
-        then
-          liftIO $ putStrLn "The version number in elm.json is correct so you are all set!"
-        else
-          changeVersion root info Pkg.initialVersion $
-            "It looks like the version in elm.json has been changed though!\n\
-            \Would you like me to change it back to " ++ Pkg.versionToString Pkg.initialVersion ++ "? [Y/n] "
-
-
-newPackageOverview :: String
-newPackageOverview =
-  unlines
-    [ "This package has never been published before. Here's how things work:"
-    , ""
-    , "  - Versions all have exactly three parts: MAJOR.MINOR.PATCH"
-    , ""
-    , "  - All packages start with initial version " ++ Pkg.versionToString Pkg.initialVersion
-    , ""
-    , "  - Versions are incremented based on how the API changes:"
-    , "      PATCH - the API is the same, no risk of breaking code"
-    , "      MINOR - values have been added, existing values are unchanged"
-    , "      MAJOR - existing values have been changed or removed"
-    , ""
-    , "  - I will bump versions for you, automatically enforcing these rules"
-    , ""
-    ]
