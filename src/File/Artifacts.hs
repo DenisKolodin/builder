@@ -59,7 +59,7 @@ write root answers =
         liftIO $ traverse readMVar mvars
 
 
-writeDocs :: FilePath -> Map Module.Raw Compiler.Result -> Task.Task ()
+writeDocs :: FilePath -> Map Module.Raw Compiler.Result -> Task.Task Docs.Documentation
 writeDocs root results =
   let
     getDocs (Compiler.Result docs _ _) =
@@ -67,11 +67,11 @@ writeDocs root results =
   in
     case Maybe.mapMaybe getDocs (Map.elems results) of
       [] ->
-        return ()
+        return Map.empty
 
       docs ->
-        liftIO $ Encode.write (root </> "docs.json") $
-          Encode.list Docs.encode docs
+        do  liftIO $ Encode.write (root </> "docs.json") $ Encode.list Docs.encode docs
+            return $ Docs.toDict docs
 
 
 

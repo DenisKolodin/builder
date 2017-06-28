@@ -5,12 +5,14 @@ module Elm.Project
   , getRootWithReplFallback
   , compile
   , compileForRepl
+  , generateDocs
   )
   where
 
 
 import Data.Text (Text)
 
+import qualified Elm.Docs as Docs
 import qualified Elm.Project.Root as Root
 import qualified Elm.Project.Summary as Summary
 import Elm.Project.Summary (Summary)
@@ -71,3 +73,17 @@ compileForRepl source maybeName =
           do  let output = Repl.toOutput results name
               path <- Output.generateReplFile summary graph output
               return (Just path)
+
+
+
+-- GENERATE DOCS
+
+
+generateDocs :: Summary.Summary -> Task.Task Docs.Documentation
+generateDocs summary@(Summary.Summary root project _ _ _) =
+  do  args <- Args.fromSummary summary
+      graph <- Crawl.crawl summary args
+      (dirty, ifaces) <- Plan.plan summary graph
+      answers <- Compile.compile project ifaces dirty
+      results <- Artifacts.ignore answers
+      Artifacts.writeDocs root results
