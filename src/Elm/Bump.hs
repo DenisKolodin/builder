@@ -104,7 +104,7 @@ suggestVersion summary@(Summary.Summary root _ _ _ _) info@(Project.PkgInfo name
         in
           concat
             [ "Based on your new API, this should be a ", magnitude, " change (", old, " => ", new, ")\n"
-            , "Bail out of this command and run 'elm-package diff' for a full explanation.\n"
+            , "Bail out of this command and run 'elm diff' for a full explanation.\n"
             , "\n"
             , "Should I perform the update (", old, " => ", new, ") in elm.json? [Y/n] "
             ]

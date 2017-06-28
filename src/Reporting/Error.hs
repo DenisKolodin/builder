@@ -153,7 +153,7 @@ toDoc err =
 
     VersionInvalid ->
       Help.makeErrorDoc
-        "Cannot publish a package with an invalid version. Use `elm-package bump` to\
+        "Cannot publish a package with an invalid version. Use `elm bump` to\
         \ figure out what the next version should be, and be sure you commit any\
         \ changes and tag them appropriately."
         []
@@ -187,7 +187,7 @@ toDoc err =
           \ You cannot publish it again! Run the following command to see what\
           \ the new version should be:"
         )
-        [ P.indent 4 $ P.text "elm-package bump"
+        [ P.indent 4 $ P.text "elm bump"
         ]
 
     Unbumpable vsn versions ->
@@ -222,7 +222,7 @@ toDoc err =
         [ reflow $
             "Generally, you want to put the most recently published version ("
             ++ Pkg.versionToString latestVersion
-            ++ " for this package) in your elm.json and run `elm-package bump` to figure out what should come next."
+            ++ " for this package) in your elm.json and run `elm bump` to figure out what should come next."
         ]
 
     BadBump old new magnitude realNew realMagnitude ->
@@ -232,7 +232,7 @@ toDoc err =
           ++ " change to the public API. This does not match the API diff given by:"
         )
         [ P.indent 4 $ P.text $
-            "elm-package diff " ++ Pkg.versionToString old
+            "elm diff " ++ Pkg.versionToString old
 
         , reflow $
           "This command says this is a " ++ error "TODO realMagnitude" realMagnitude
@@ -240,7 +240,7 @@ toDoc err =
           ++ Pkg.versionToString realNew
           ++ ". Double check everything to make sure you are publishing what you want!"
         , reflow $
-            "Also, next time use `elm-package bump` and I'll figure all this out for you!"
+            "Also, next time use `elm bump` and I'll figure all this out for you!"
         ]
 
     PublishWithoutSummary ->
@@ -265,7 +265,7 @@ hintToDoc hint =
         , reflow $
             "But there are no released versions in that range! I recommend\
             \ removing that constraint by hand and adding it back with:"
-        , P.indent 4 $ P.text $ "elm-package install " ++ Pkg.toString name
+        , P.indent 4 $ P.text $ "elm install " ++ Pkg.toString name
         ]
 
     IncompatibleConstraint name constraint viableVersion ->
@@ -277,7 +277,7 @@ hintToDoc hint =
             ++ Pkg.versionToString Compiler.version ++ ". I recommend removing\
             \ that dependency by hand and adding it back with:"
         , P.indent 4 $
-            P.text ("elm-package install " ++ Pkg.toString name)
+            P.text ("elm install " ++ Pkg.toString name)
             <+> P.dullyellow (P.text (Pkg.versionToString viableVersion))
         ]
 
