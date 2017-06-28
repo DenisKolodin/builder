@@ -26,6 +26,7 @@ import qualified Data.Map as Map
 import qualified Data.Text as Text
 import qualified Network.HTTP.Client as Client
 import qualified Network.HTTP.Client.MultipartFormData as Multi
+import qualified Network.HTTP.Types as Http
 import qualified System.Directory as Dir
 import System.FilePath ((</>), splitFileName)
 
@@ -36,7 +37,6 @@ import qualified Json.Decode as Decode
 import qualified Reporting.Progress as Progress
 import qualified Reporting.Task as Task
 import qualified Reporting.Task.Http as Http
-import qualified Stuff.Paths as Path
 
 
 
@@ -117,19 +117,14 @@ fetchByteString path =
 
 fetchJson :: Decode.Decoder a -> String -> Http.Fetch a
 fetchJson decoder path =
-  Http.package path [] (jsonHandler decoder)
-
-
-jsonHandler :: Decode.Decoder a -> Http.Handler a
-jsonHandler decoder =
-  \request manager ->
+  Http.package path [] $ \request manager ->
     do  response <- Client.httpLbs request manager
         case Decode.parse decoder (Client.responseBody response) of
           Right value ->
             return $ Right value
 
-          Left _ ->
-            return $ Left "I received corrupt JSON from server. TODO explain"
+          Left jsonProblem ->
+            return $ Left "I received corrupt JSON from server. TODO explain jsonProblem"
 
 
 
@@ -262,9 +257,23 @@ githubCommit name version =
   let
     endpoint =
       "https://api.github.com/repos/" ++ Pkg.toUrl name ++ "/git/refs/tags/" ++ Pkg.versionToString version
+
+    headers =
+      [ ( Http.hUserAgent, "elm-cli" )
+      , ( Http.hAccept, "application/json" )
+      ]
+
+    decoder =
+      Decode.at ["object","sha"] Decode.string
   in
-    Http.run $ Http.anything endpoint $
-      jsonHandler (Decode.at ["object","sha"] Decode.string)
+    Http.run $ Http.anything endpoint $ \request manager ->
+      do  response <- Client.httpLbs (request { Client.requestHeaders = headers }) manager
+          case Decode.parse decoder (Client.responseBody response) of
+            Right value ->
+              return $ Right value
+
+            Left jsonProblem ->
+              return $ Left "I received corrupt JSON from GitHub. TODO explain jsonProblem"
 
 
 
