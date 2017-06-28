@@ -5,6 +5,7 @@ module Elm.Project.Json
   , RawProject(..)
   , AppInfo(..)
   , PkgInfo(..)
+  , defaultSummary
   -- json
   , write
   , encode
@@ -89,6 +90,15 @@ data PkgInfo =
     , _pkg_elm_version :: Con.Constraint
     , _pkg_effects :: Bool
     }
+
+
+
+-- DEFAULTS
+
+
+defaultSummary :: Text
+defaultSummary =
+  "helpful summary of your project, less than 80 characters"
 
 
 
