@@ -6,6 +6,7 @@ module Reporting.Progress
   , Progress(..)
   , Outcome(..)
   , PublishPhase(..)
+  , BumpPhase(..)
   )
   where
 
@@ -69,7 +70,8 @@ data Progress
   | CompileEnd
 
   -- publish
-  | PublishStart Name Version
+  | PublishStart Name Version (Maybe [Version])
+  | PublishCheckBump Version BumpPhase
   | PublishProgress PublishPhase (Maybe Outcome)
   | PublishEnd
 
@@ -81,8 +83,14 @@ data Outcome = Good | Bad
 
 
 data PublishPhase
-  = CheckVersion Version Version Magnitude
-  | CheckTag Version
+  = CheckTag Version
   | CheckDownload
   | CheckBuild
   | CheckChanges
+
+
+data BumpPhase
+  = StatedVersion
+  | GoodStart
+  | GoodBump Version Magnitude
+  | BadBump

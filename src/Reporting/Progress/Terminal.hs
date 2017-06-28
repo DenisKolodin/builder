@@ -1,6 +1,7 @@
 {-# OPTIONS_GHC -Wall #-}
 module Reporting.Progress.Terminal
   ( create
+  , newPackageOverview
   )
   where
 
@@ -17,7 +18,7 @@ import Elm.Package (Name, Version)
 
 import qualified Deps.Diff as Diff
 import qualified Reporting.Error as Error
-import Reporting.Progress (Msg(..), Progress(..), Outcome(..), PublishPhase(..))
+import Reporting.Progress (Msg(..), Progress(..), Outcome(..), PublishPhase(..), BumpPhase(..))
 import qualified Reporting.Progress as Progress
 import qualified Reporting.Progress.Bar as Bar
 
@@ -151,12 +152,23 @@ loopHelp chan progress state@(State total good bad) =
 
     -- PUBLISH
 
-    PublishStart name version ->
-      do  putStrLn $ unwords [ "Verifying", Pkg.toString name, Pkg.versionToString version, "..."  ]
+    PublishStart name version maybePublishedVersions ->
+      case maybePublishedVersions of
+        Nothing ->
+          do  putStrLn newPackageOverview
+              putStrLn "I will now verify that everything is in order..."
+              loop chan state
+
+        Just _ ->
+          do  putStrLn $ unwords [ "Verifying", Pkg.toString name, Pkg.versionToString version, "..."  ]
+              loop chan state
+
+    PublishCheckBump version bumpPhase ->
+      do  writeDoc $ bumpPhaseToChecklistDoc version bumpPhase
           loop chan state
 
     PublishProgress phase status ->
-      do  writeDoc $ toChecklistDoc phase status
+      do  writeDoc $ toChecklistDoc status (toChecklistMessages phase)
           loop chan state
 
     PublishEnd ->
@@ -216,15 +228,36 @@ badMark =
 
 
 
+-- OVERVIEW OF VERSIONING
+
+
+newPackageOverview :: String
+newPackageOverview =
+  unlines
+    [ "This package has never been published before. Here's how things work:"
+    , ""
+    , "  - Versions all have exactly three parts: MAJOR.MINOR.PATCH"
+    , ""
+    , "  - All packages start with initial version " ++ Pkg.versionToString Pkg.initialVersion
+    , ""
+    , "  - Versions are incremented based on how the API changes:"
+    , ""
+    , "        PATCH = the API is the same, no risk of breaking code"
+    , "        MINOR = values have been added, existing values are unchanged"
+    , "        MAJOR = existing values have been changed or removed"
+    , ""
+    , "  - I will bump versions for you, automatically enforcing these rules"
+    , ""
+    ]
+
+
+
 -- CHECKLIST
 
 
-toChecklistDoc :: PublishPhase -> Maybe Outcome -> P.Doc
-toChecklistDoc phase status =
+toChecklistDoc :: Maybe Outcome -> ChecklistMessages -> P.Doc
+toChecklistDoc status (ChecklistMessages waiting success failure) =
   let
-    (ChecklistMessages waiting success failure) =
-      toChecklistMessages phase
-
     padded message =
       message ++ replicate (length waiting - length message) ' '
   in
@@ -265,12 +298,6 @@ data ChecklistMessages =
 toChecklistMessages :: PublishPhase -> ChecklistMessages
 toChecklistMessages phase =
   case phase of
-    CheckVersion old new magnitude ->
-      ChecklistMessages
-        ("Checking semantic versioning rules. Is " ++ Pkg.versionToString new ++ " correct?")
-        (toCheckVersionSuccessMessage old new magnitude)
-        ("Version " ++ Pkg.versionToString new ++ " is not correct!")
-
     CheckTag version ->
       ChecklistMessages
         ("Is version " ++ Pkg.versionToString version ++ " tagged on GitHub?")
@@ -294,6 +321,36 @@ toChecklistMessages phase =
         "Checking for uncommitted changes..."
         "No uncommitted changes in local code"
         "Your local code is different than the code tagged on GitHub"
+
+
+
+-- BUMP PHASE
+
+
+bumpPhaseToChecklistDoc :: Pkg.Version -> BumpPhase -> P.Doc
+bumpPhaseToChecklistDoc version bumpPhase =
+  let
+    mkMsgs success =
+      ChecklistMessages
+        ("Checking semantic versioning rules. Is " ++ Pkg.versionToString version ++ " correct?")
+        success
+        ("Version " ++ Pkg.versionToString version ++ " is not correct!")
+  in
+
+  case bumpPhase of
+    StatedVersion ->
+      toChecklistDoc Nothing $ mkMsgs ""
+
+    GoodStart ->
+      toChecklistDoc (Just Good) $ mkMsgs $
+        "All packages start at version " ++ Pkg.versionToString Pkg.initialVersion
+
+    GoodBump old magnitude ->
+      toChecklistDoc (Just Good) $ mkMsgs $
+        toCheckVersionSuccessMessage old version magnitude
+
+    BadBump ->
+      toChecklistDoc (Just Bad) $ mkMsgs ""
 
 
 toCheckVersionSuccessMessage :: Pkg.Version -> Pkg.Version -> Diff.Magnitude -> String
