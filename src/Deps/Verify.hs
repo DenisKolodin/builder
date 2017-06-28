@@ -3,7 +3,7 @@ module Deps.Verify (verify) where
 
 import Control.Concurrent (forkIO)
 import Control.Concurrent.MVar (MVar, newMVar, newEmptyMVar, putMVar, readMVar, takeMVar)
-import Control.Monad (filterM, forM, void)
+import Control.Monad (filterM, void)
 import Control.Monad.Trans (liftIO)
 import qualified Data.Map as Map
 import qualified Data.Maybe as Maybe
