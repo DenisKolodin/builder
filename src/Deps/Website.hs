@@ -271,25 +271,25 @@ githubCommit name version =
 -- DOWNLOAD FROM GITHUB
 
 
-githubDownload :: Name -> Version -> Task.Task Sha
-githubDownload name version =
+githubDownload :: Name -> Version -> FilePath -> Task.Task Sha
+githubDownload name version dir =
   let
     endpoint =
       "https://api.github.com/repos/" ++ Pkg.toUrl name ++ "/git/refs/tags/" ++ Pkg.versionToString version
   in
     Http.run $ Http.anything endpoint $ \request manager ->
-      Client.withResponse request manager githubDownloadHelp
+      Client.withResponse request manager (githubDownloadHelp dir)
 
 
-githubDownloadHelp :: Client.Response Client.BodyReader -> IO (Either String Sha)
-githubDownloadHelp response =
+githubDownloadHelp :: FilePath -> Client.Response Client.BodyReader -> IO (Either String Sha)
+githubDownloadHelp targetDir response =
   do  result <- readArchive (Client.responseBody response) initialArchiveState
       case result of
         Left msg ->
           return (Left msg)
 
         Right (sha, archive) ->
-          do  let (dir, root) = splitFileName Path.prepublishDir
+          do  let (dir, root) = splitFileName targetDir
               writeArchive archive dir root
               return $ Right sha
 
