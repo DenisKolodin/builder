@@ -19,7 +19,6 @@ module Elm.Project.Constraint
   where
 
 import Control.Monad (guard)
-import qualified Data.Aeson as Json
 import qualified Data.Text as Text
 import Data.Text (Text)
 
@@ -225,23 +224,3 @@ expand constraint@(Range lower lowerOp upperOp upper) version
 
   | otherwise =
       constraint
-
-
-
--- JSON CONVERSION
-
-
-instance Json.ToJSON Constraint where
-  toJSON constraint =
-    Json.String (toText constraint)
-
-
-instance Json.FromJSON Constraint where
-  parseJSON =
-    Json.withText "Constraint" $ \text ->
-      case fromText text of
-        Just constraint ->
-          return constraint
-
-        Nothing ->
-          fail "bad constraint, need something like \"1.2.1 <= v < 2.0.0\""
