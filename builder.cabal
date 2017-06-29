@@ -43,6 +43,7 @@ Library
 
     exposed-modules:
         Elm.Bump,
+        Elm.Diff,
         Elm.Install,
         Elm.PerUserCache,
         Elm.Project,

@@ -2,11 +2,13 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Deps.Diff
   ( diff
-  , PackageChanges
+  , PackageChanges(..)
+  , ModuleChanges(..)
+  , Changes(..)
   , Magnitude(..)
+  , moduleChangeMagnitude
   , magnitudeToString
   , toMagnitude
-  , toDoc
   , bump
   )
   where
@@ -19,14 +21,11 @@ import qualified Data.Map as Map
 import qualified Data.Set as Set
 import qualified Data.Text as Text
 import Data.Text (Text)
-import Text.PrettyPrint.ANSI.Leijen ((<+>), (<>))
-import qualified Text.PrettyPrint.ANSI.Leijen as P
 
 import qualified Elm.Compiler.Module as Module
 import qualified Elm.Compiler.Type as Type
 import qualified Elm.Docs as Docs
 import qualified Elm.Package as Pkg
-import qualified Reporting.Error.Help as Help
 
 
 
@@ -352,147 +351,3 @@ changeMagnitude (Changes added changed removed) =
 
   else
     PATCH
-
-
-
--- TO DOC
-
-
-toDoc :: PackageChanges -> P.Doc
-toDoc changes@(PackageChanges added changed removed) =
-  let
-    header =
-      P.text "This is a"
-      <+> P.text (magnitudeToString (toMagnitude changes))
-      <+> P.text "change."
-
-    addedModules =
-      if null added then [] else
-        [ toHeaderDoc "Added modules" MINOR
-        , P.vcat $ map (P.indent 4 . P.text . Module.nameToString) added
-        , P.empty
-        ]
-
-    removedModules =
-      if null removed then [] else
-        [ toHeaderDoc "Removed modules" MAJOR
-        , P.vcat $ map (P.indent 4 . P.text . Module.nameToString) removed
-        , P.empty
-        ]
-  in
-    Help.stack $
-      header : addedModules ++ removedModules ++ map changesToDoc (Map.toList changed)
-
-
-toHeaderDoc :: String -> Magnitude -> P.Doc
-toHeaderDoc title magnitude =
-  P.dullcyan (P.text "------")
-  <+> P.text title
-  <+> P.text "-"
-  <+> P.text (magnitudeToString magnitude)
-  <+> P.dullcyan (P.text (replicate (64 - length title) '-'))
-
-
-changesToDoc :: (Text, ModuleChanges) -> P.Doc
-changesToDoc (name, changes@(ModuleChanges unions aliases values)) =
-  let
-    magnitude =
-      moduleChangeMagnitude changes
-
-    (unionAdd, unionChange, unionRemove) =
-      changesToDocs unionToDoc unions
-
-    (aliasAdd, aliasChange, aliasRemove) =
-      changesToDocs aliasToDoc aliases
-
-    (valueAdd, valueChange, valueRemove) =
-      changesToDocs valueToDoc values
-  in
-    P.vcat
-      [ toHeaderDoc ("Changes to module " ++ Text.unpack name) magnitude
-      , changesToDocHelp "Added" unionAdd aliasAdd valueAdd
-      , changesToDocHelp "Removed" unionRemove aliasRemove valueRemove
-      , changesToDocHelp "Changed" unionChange aliasChange valueChange
-      ]
-
-
-changesToDocs :: (k -> v -> P.Doc) -> Changes k v -> ([P.Doc], [P.Doc], [P.Doc])
-changesToDocs entryToDoc (Changes added changed removed) =
-  let
-    indented (name, value) =
-      P.text "        " <> entryToDoc name value
-
-    diffed (name, (oldValue, newValue)) =
-      P.vcat
-        [ P.text "      - " <> entryToDoc name oldValue
-        , P.text "      + " <> entryToDoc name newValue
-        , P.text ""
-        ]
-  in
-    ( map indented (Map.toList added)
-    , map diffed   (Map.toList changed)
-    , map indented (Map.toList removed)
-    )
-
-
-changesToDocHelp :: String -> [P.Doc] -> [P.Doc] -> [P.Doc] -> P.Doc
-changesToDocHelp categoryName unions aliases values =
-  if null unions && null aliases && null values then
-    ""
-
-  else
-    P.vcat $
-      [ P.text ""
-      , P.text ""
-      , P.text ("    " ++ categoryName ++ ":")
-      ]
-      ++ unions
-      ++ aliases
-      ++ values
-
-
-unionToDoc :: Text -> Docs.Union -> P.Doc
-unionToDoc name (Docs.Union tvars ctors) =
-  let
-    setup =
-      P.text "type" <+> text name <+> P.hsep (map text tvars)
-
-    separators =
-      map P.text ("=" : repeat "|")
-
-    ctorDoc (ctor, tipes) =
-      typeDoc (Type.App (Type.Type ctor) tipes)
-  in
-    P.hang 4 (P.sep (setup : zipWith (<+>) separators (map ctorDoc ctors)))
-
-
-aliasToDoc :: Text -> Docs.Alias -> P.Doc
-aliasToDoc name (Docs.Alias tvars tipe) =
-  let
-    typeAlias =
-      P.text "type" <+> P.text "alias"
-
-    declaration =
-      typeAlias <+> text name <+> P.hsep (map text tvars) <+> P.equals
-  in
-    P.hang 4 (P.sep [ declaration, typeDoc tipe ])
-
-
-valueToDoc :: Text -> Docs.Value Type.Type -> P.Doc
-valueToDoc name value =
-  case value of
-    Docs.Value tipe ->
-      text name <+> P.colon <+> typeDoc tipe
-
-    Docs.Infix tipe _ _ ->
-      P.text "(" <> text name <> P.text ")" <+> P.colon <+> typeDoc tipe
-
-
-typeDoc :: Type.Type -> P.Doc
-typeDoc tipe =
-  P.text (Type.toString Type.OneLine tipe)
-
-
-text :: Text -> P.Doc
-text txt =
-  P.text (Text.unpack txt)
