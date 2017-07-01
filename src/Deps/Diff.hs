@@ -18,6 +18,7 @@ import Control.Monad (zipWithM)
 import Data.Function (on)
 import qualified Data.List as List
 import qualified Data.Map as Map
+import Data.Monoid ((<>))
 import qualified Data.Set as Set
 import qualified Data.Text as Text
 import Data.Text (Text)
@@ -156,25 +157,17 @@ diffType oldType newType =
     (Type.Var oldName, Type.Var newName) ->
       Just [(oldName, newName)]
 
-    (Type.Type oldName, Type.Type newName) ->
-      -- TODO handle old names with no module prefixes
-      if oldName == newName then
-        Just []
-      else
-        Nothing
-
     (Type.Lambda a b, Type.Lambda a' b') ->
       (++)
         <$> diffType a a'
         <*> diffType b b'
 
-    (Type.App t ts, Type.App t' ts') ->
-      if length ts /= length ts' then
+    (Type.Type oldName oldArgs, Type.Type newName newArgs) ->
+      -- TODO handle old names with no module prefixes
+      if oldName /= newName || length oldArgs /= length newArgs then
         Nothing
       else
-        (++)
-          <$> diffType t t'
-          <*> (concat <$> zipWithM diffType ts ts')
+        concat <$> zipWithM diffType oldArgs newArgs
 
     (Type.Record fields maybeExt, Type.Record fields' maybeExt') ->
       case (maybeExt, maybeExt') of
@@ -194,6 +187,7 @@ diffType oldType newType =
 
     (_, _) ->
       Nothing
+
 
 
 diffFields :: [(Text, Type.Type)] -> [(Text, Type.Type)] -> Maybe [(Text,Text)]
