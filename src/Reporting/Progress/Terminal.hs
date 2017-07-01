@@ -18,6 +18,7 @@ import Elm.Package (Name, Version)
 
 import qualified Deps.Diff as Diff
 import qualified Reporting.Error as Error
+import qualified Reporting.Error.Help as Help
 import Reporting.Progress (Msg(..), Progress(..), Outcome(..), PublishPhase(..), BumpPhase(..))
 import qualified Reporting.Progress as Progress
 import qualified Reporting.Progress.Bar as Bar
@@ -87,7 +88,7 @@ loopHelp chan progress state@(State total good bad) =
       loop chan state
 
     DownloadPkgEnd name version outcome ->
-      do  writeDoc (makeBullet name version outcome)
+      do  Help.toStdout (makeBullet name version outcome)
           loop chan state
 
     DownloadEnd Bad ->
@@ -157,18 +158,21 @@ loopHelp chan progress state@(State total good bad) =
         Nothing ->
           do  putStrLn newPackageOverview
               putStrLn "I will now verify that everything is in order..."
+              putStrLn ""
               loop chan state
 
         Just _ ->
           do  putStrLn $ unwords [ "Verifying", Pkg.toString name, Pkg.versionToString version, "..."  ]
+              putStrLn ""
               loop chan state
 
     PublishCheckBump version bumpPhase ->
-      do  writeDoc $ bumpPhaseToChecklistDoc version bumpPhase
+      do  Help.toStdout $ bumpPhaseToChecklistDoc version bumpPhase
           loop chan state
 
     PublishProgress phase status ->
-      do  writeDoc $ toChecklistDoc status (toChecklistMessages phase)
+      do  Help.toStdout $ toChecklistDoc status (toChecklistMessages phase)
+          hFlush stdout
           loop chan state
 
     PublishEnd ->
@@ -180,18 +184,9 @@ loopHelp chan progress state@(State total good bad) =
 
     UnableToLoadLatestPackages ->
       do  putStrLn ""
-          writeDoc $ P.dullyellow (P.text "WARNING:") <+> P.text "I normally check <https://package.elm-lang.org> for new packages"
+          Help.toStdout $ P.dullyellow (P.text "WARNING:") <+> P.text "I normally check <https://package.elm-lang.org> for new packages"
           putStrLn "here, but my request failed. Are you offline? I will try to continue anyway.\n"
           loop chan state
-
-
-
--- DOC HELPERS
-
-
-writeDoc :: P.Doc -> IO ()
-writeDoc doc =
-  P.displayIO stdout $ P.renderPretty 1 80 doc
 
 
 
@@ -225,6 +220,12 @@ badMark :: P.Doc
 badMark =
   P.red $ P.text $
     if System.os == "windows" then "X" else "✗"
+
+
+waitingMark :: P.Doc
+waitingMark =
+  P.dullyellow $ P.text $
+    if System.os == "windows" then "-" else "•"
 
 
 
@@ -266,25 +267,10 @@ toChecklistDoc status (ChecklistMessages waiting success failure) =
         P.text "  " <> waitingMark <+> P.text waiting
 
       Just Good ->
-        P.text "\r  " <> successMark <+> P.text (padded success ++ "\n")
+        P.text "\r  " <> goodMark <+> P.text (padded success ++ "\n")
 
       Just Bad ->
-        P.text "\r  " <> failureMark <+> P.text (padded failure ++ "\n")
-
-
-waitingMark :: P.Doc
-waitingMark =
-  P.dullyellow $ P.text "☐"
-
-
-successMark :: P.Doc
-successMark =
-  P.green $ P.text "☑"
-
-
-failureMark :: P.Doc
-failureMark =
-  P.red $ P.text "☒"
+        P.text "\r  " <> badMark <+> P.text (padded failure ++ "\n\n")
 
 
 data ChecklistMessages =
