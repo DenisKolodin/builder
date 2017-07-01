@@ -12,7 +12,6 @@ import qualified Data.List as List
 import qualified Data.Map as Map
 import qualified Data.Maybe as Maybe
 import qualified Data.Text as Text
-import qualified System.IO as IO
 import Text.PrettyPrint.ANSI.Leijen ((<>), (<+>))
 import qualified Text.PrettyPrint.ANSI.Leijen as P
 
@@ -104,7 +103,7 @@ getPackageInfo =
 
 writeDoc :: P.Doc -> Task.Task ()
 writeDoc doc =
-  liftIO $ P.displayIO IO.stdout $ P.renderPretty 1 80 (doc <> "\n")
+  liftIO $ Help.toStdout (doc <> "\n")
 
 
 

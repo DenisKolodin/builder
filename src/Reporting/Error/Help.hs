@@ -5,6 +5,7 @@ module Reporting.Error.Help
   , reflow
   , makeErrorDoc
   , toString
+  , toStdout
   , toStderr
   , nearbyNames
   )
@@ -13,7 +14,7 @@ module Reporting.Error.Help
 import Data.Function (on)
 import qualified Data.List as List
 import GHC.IO.Handle (hIsTerminalDevice)
-import System.IO (hPutStr, stderr)
+import System.IO (Handle, hPutStr, stderr, stdout)
 import qualified Text.EditDistance as Dist
 import Text.PrettyPrint.ANSI.Leijen
   ( Doc, (<>), displayS, displayIO, fillSep, hardline
@@ -72,12 +73,22 @@ toString doc =
   displayS (renderPretty 1 80 (plain doc)) ""
 
 
+toStdout :: Doc -> IO ()
+toStdout doc =
+  toHandle stdout doc
+
+
 toStderr :: Doc -> IO ()
 toStderr doc =
-  do  isTerminal <- hIsTerminalDevice stderr
+  toHandle stderr doc
+
+
+toHandle :: Handle -> Doc -> IO ()
+toHandle handle doc =
+  do  isTerminal <- hIsTerminalDevice handle
       if isTerminal
-        then displayIO stderr (renderPretty 1 80 doc)
-        else hPutStr stderr (toString doc)
+        then displayIO handle (renderPretty 1 80 doc)
+        else hPutStr handle (toString doc)
 
 
 
