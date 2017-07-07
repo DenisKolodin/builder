@@ -320,7 +320,8 @@ register name version commitHash digest =
       [ Multi.partFileSource "elm.json" "elm.json"
       , Multi.partFileSource "docs.json" "docs.json"
       , Multi.partFileSource "README.md" "README.md"
-      , Multi.partBS "github-hash" (BS.pack (SHA.showDigest digest))
+      , Multi.partFileRequestBody "github-hash" "github-hash" $
+          Client.RequestBodyBS (BS.pack (SHA.showDigest digest))
       ]
   in
     Http.run $ Http.package "register" params $ \rawRequest manager ->
