@@ -59,19 +59,24 @@ bump summary@(Summary.Summary root project _ _ _) =
 
 toPossibleBumps :: [Pkg.Version] -> [(Pkg.Version, Pkg.Version, Diff.Magnitude)]
 toPossibleBumps publishedVersions =
-  let
-    patchPoints =
-      Pkg.filterLatest Pkg.majorAndMinor publishedVersions
+  case publishedVersions of
+    [] ->
+      []
 
-    minorPoints =
-      Pkg.filterLatest Pkg._major publishedVersions
+    _ ->
+      let
+        patchPoints =
+          Pkg.filterLatest Pkg.majorAndMinor publishedVersions
 
-    majorPoint =
-      head publishedVersions
-  in
-    (majorPoint, Pkg.bumpMajor majorPoint, Diff.MAJOR)
-    :  map (\v -> (v, Pkg.bumpMinor v, Diff.MINOR)) minorPoints
-    ++ map (\v -> (v, Pkg.bumpPatch v, Diff.PATCH)) patchPoints
+        minorPoints =
+          Pkg.filterLatest Pkg._major publishedVersions
+
+        majorPoint =
+          maximum publishedVersions
+      in
+        (majorPoint, Pkg.bumpMajor majorPoint, Diff.MAJOR)
+        :  map (\v -> (v, Pkg.bumpMinor v, Diff.MINOR)) minorPoints
+        ++ map (\v -> (v, Pkg.bumpPatch v, Diff.PATCH)) patchPoints
 
 
 
