@@ -168,6 +168,7 @@ loopHelp chan progress state@(State total good bad) =
 
     PublishCheckBump version bumpPhase ->
       do  Help.toStdout $ bumpPhaseToChecklistDoc version bumpPhase
+          hFlush stdout
           loop chan state
 
     PublishProgress phase status ->
@@ -176,7 +177,7 @@ loopHelp chan progress state@(State total good bad) =
           loop chan state
 
     PublishEnd ->
-      do  putStrLn "\n\nSuccess!"
+      do  putStrLn "Success!"
           loop chan state
 
 
@@ -225,7 +226,7 @@ badMark =
 waitingMark :: P.Doc
 waitingMark =
   P.dullyellow $ P.text $
-    if System.os == "windows" then "-" else "•"
+    if System.os == "windows" then "-" else "→"
 
 
 
@@ -299,7 +300,7 @@ toChecklistMessages phase =
     CheckBuild ->
       ChecklistMessages
         "Building downloaded code and generated docs..."
-        "Downloaded code compiles successfully / docs generated"
+        "Downloaded code compiles successfully / docs generated\n"
         "Cannot compile downloaded code!"
 
     CheckChanges ->
