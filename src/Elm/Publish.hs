@@ -71,16 +71,22 @@ verifyTag name version =
 verifyNoChanges :: String -> Task.Task ()
 verifyNoChanges commitHash =
   phase Progress.CheckChanges $
-    do  -- https://stackoverflow.com/questions/3878624/how-do-i-programmatically-determine-if-there-are-uncommited-changes
-        exitCode <- liftIO $
-          Process.rawSystem "git" [ "diff-index", "--quiet", commitHash, "--" ]
+    do  maybeGit <- liftIO $ Dir.findExecutable "git"
+        case maybeGit of
+          Nothing ->
+            Task.throw (error "TODO cannot find git on your computer")
 
-        case exitCode of
-          Exit.ExitSuccess ->
-            return ()
+          Just git ->
+            do  -- https://stackoverflow.com/questions/3878624/how-do-i-programmatically-determine-if-there-are-uncommited-changes
+                exitCode <- liftIO $
+                  Process.rawSystem git [ "diff-index", "--quiet", commitHash, "--" ]
 
-          Exit.ExitFailure _ ->
-            Task.throw (error "TODO local modules do not match")
+                case exitCode of
+                  Exit.ExitSuccess ->
+                    return ()
+
+                  Exit.ExitFailure _ ->
+                    Task.throw (error "TODO local modules do not match")
 
 
 verifyZip :: Pkg.Name -> Pkg.Version -> Task.Task Website.Sha
