@@ -233,7 +233,7 @@ getIface name version info infos depIfaces =
               (dirty, cachedIfaces) <- Plan.plan summary graph
               answers <- Compile.compile (Pkg info) cachedIfaces dirty
               results <- Artifacts.ignore answers
-              Artifacts.writeDocs root results
+              Artifacts.writeDocs (root </> "docs.json") results
 
               Paths.removeStuff root
 

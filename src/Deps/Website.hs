@@ -37,6 +37,7 @@ import qualified Json.Decode as Decode
 import qualified Reporting.Progress as Progress
 import qualified Reporting.Task as Task
 import qualified Reporting.Task.Http as Http
+import qualified Stuff.Paths as Path
 
 
 
@@ -318,7 +319,7 @@ register name version commitHash digest =
 
     files =
       [ Multi.partFileSource "elm.json" "elm.json"
-      , Multi.partFileSource "docs.json" "docs.json"
+      , Multi.partFileSource "docs.json" Path.docs
       , Multi.partFileSource "README.md" "README.md"
       , Multi.partFileRequestBody "github-hash" "github-hash" $
           Client.RequestBodyBS (BS.pack (SHA.showDigest digest))

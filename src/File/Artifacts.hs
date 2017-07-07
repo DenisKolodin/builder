@@ -24,7 +24,7 @@ import File.Compile (Answer(..))
 import qualified Reporting.Error.Compile as E
 import qualified Reporting.Error as Error
 import qualified Reporting.Task as Task
-import qualified Stuff.Paths as Paths
+import qualified Stuff.Paths as Path
 
 
 
@@ -50,8 +50,8 @@ write root answers =
     writer name result@(Compiler.Result _ ifaces objs) =
       do  mvar <- newEmptyMVar
           void $ forkIO $
-            do  Binary.encodeFile (Paths.elmi root name) ifaces
-                Binary.encodeFile (Paths.elmo root name) objs
+            do  Binary.encodeFile (Path.elmi root name) ifaces
+                Binary.encodeFile (Path.elmo root name) objs
                 putMVar mvar result
           return mvar
   in
@@ -60,7 +60,7 @@ write root answers =
 
 
 writeDocs :: FilePath -> Map Module.Raw Compiler.Result -> Task.Task Docs.Documentation
-writeDocs root results =
+writeDocs path results =
   let
     getDocs (Compiler.Result docs _ _) =
       docs
@@ -70,7 +70,7 @@ writeDocs root results =
         return Map.empty
 
       docs ->
-        do  liftIO $ Encode.write (root </> "docs.json") $ Encode.list Docs.encode docs
+        do  liftIO $ Encode.write path $ Encode.list Docs.encode docs
             return $ Docs.toDict docs
 
 

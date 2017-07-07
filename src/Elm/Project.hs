@@ -11,6 +11,7 @@ module Elm.Project
 
 
 import Data.Text (Text)
+import System.FilePath ((</>))
 
 import qualified Elm.Docs as Docs
 import qualified Elm.Project.Root as Root
@@ -24,6 +25,7 @@ import qualified File.Plan as Plan
 import qualified Generate.Output as Output
 import qualified Generate.Repl as Repl
 import qualified Reporting.Task as Task
+import qualified Stuff.Paths as Path
 
 
 
@@ -86,4 +88,4 @@ generateDocs summary@(Summary.Summary root project _ _ _) =
       (dirty, ifaces) <- Plan.plan summary graph
       answers <- Compile.compile project ifaces dirty
       results <- Artifacts.ignore answers
-      Artifacts.writeDocs root results
+      Artifacts.writeDocs (root </> Path.docs) results

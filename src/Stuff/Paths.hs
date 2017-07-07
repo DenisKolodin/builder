@@ -1,6 +1,7 @@
 {-# OPTIONS_GHC -Wall #-}
 module Stuff.Paths
-  ( solution
+  ( docs
+  , solution
   , summary
   , prepublishDir
   , removeStuff
@@ -29,6 +30,11 @@ import qualified Reporting.Task as Task
 stuff :: FilePath
 stuff =
   "elm-stuff" </> Pkg.versionToString Compiler.version
+
+
+docs :: FilePath
+docs =
+  stuff </> "docs.json"
 
 
 solution :: FilePath
