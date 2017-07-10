@@ -61,11 +61,11 @@ parse bytestring =
         Nothing ->
           return plan
 
-        Just _ ->
-          throw E.BadContent
+        Just problem ->
+          throw (E.BadContent problem)
 
 
-throw :: E.JsonProblem -> Task.Task a
+throw :: E.BadJson E.BuildPlanProblem -> Task.Task a
 throw problem =
   Task.throw (Error.Assets (E.BadBuildPlan problem))
 
@@ -96,7 +96,7 @@ pageDecoder =
 -- VALIDATE
 
 
-detectProblems :: Plan -> Maybe a
+detectProblems :: Plan -> Maybe E.BuildPlanProblem
 detectProblems (Plan cache pages bundles _ _) =
   let
     uniquePages =
