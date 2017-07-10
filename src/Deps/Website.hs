@@ -75,10 +75,10 @@ newPkgDecoder =
               Decode.succeed newPkg
 
             Left _ ->
-              Decode.fail "a new package like \"elm-lang/core@6.0.1\""
+              Decode.fail "Expecting a new package like \"elm-lang/core@6.0.1\""
 
         _ ->
-          Decode.fail "a new package like \"elm-lang/core@6.0.1\""
+          Decode.fail "Expecting a new package like \"elm-lang/core@6.0.1\""
 
 
 
@@ -93,16 +93,21 @@ getAllPackages =
 allPkgsDecoder :: Decode.Decoder (Map.Map Name [Version])
 allPkgsDecoder =
   let
-    depair (key, value) =
-      (,) <$> Pkg.fromText key <*> pure value
+    checkKeys pairs pkgs =
+      case pairs of
+        [] ->
+          Decode.succeed pkgs
+
+        (key, versions) : rest ->
+          case Pkg.fromText key of
+            Left msg ->
+              Decode.fail $ "Field \"" ++ Text.unpack key ++ "\" is not a valid package name. " ++ msg
+
+            Right pkg ->
+              checkKeys rest (Map.insert pkg versions pkgs)
   in
     do  dict <- Decode.dict (Decode.list Pkg.versionDecoder)
-        case traverse depair (HashMap.toList dict) of
-          Left _ ->
-            Decode.fail "valid package names"
-
-          Right pairs ->
-            Decode.succeed (Map.fromList pairs)
+        checkKeys (HashMap.toList dict) Map.empty
 
 
 
