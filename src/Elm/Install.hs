@@ -56,7 +56,7 @@ install pkg =
 makePlan :: Name -> Project.Project -> (Project.Project -> Task.Task ()) -> Task.Task ()
 makePlan pkg project attemptInstall =
   case project of
-    Project.App info@(Project.AppInfo elm srcDirs deps test trans) plan ->
+    Project.App info@(Project.AppInfo elm srcDirs deps test trans) ->
       do  changes <- addToApp pkg info
 
           let news = Map.mapMaybe keepNew changes
@@ -64,7 +64,7 @@ makePlan pkg project attemptInstall =
           let newTest = addNews Nothing news test
           let newTrans = Map.union (Map.difference news (Map.union newDeps newTest)) trans
           let newInfo = Project.AppInfo elm srcDirs newDeps newTest newTrans
-          let newProject = Project.App newInfo plan
+          let newProject = Project.App newInfo
 
           withApproval Pkg.versionToString changes (attemptInstall newProject)
 

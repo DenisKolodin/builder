@@ -37,8 +37,5 @@ fromSummary (Summary.Summary _ project _ _ _) =
     Project.Pkg info ->
       return $ Pkg (Project._pkg_exposed info)
 
-    Project.App _ Nothing ->
+    Project.App _ ->
       Task.throw (error "TODO cannot call elm make with no files and no plan")
-
-    Project.App _ (Just plan) ->
-      return $ App plan

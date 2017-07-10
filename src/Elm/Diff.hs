@@ -89,7 +89,7 @@ getPackageInfo :: Task.Task (Summary.Summary, Pkg.Name, [Pkg.Version])
 getPackageInfo =
   do  summary <- Project.getRoot
       case Summary._project summary of
-        Project.App _ _ ->
+        Project.App _ ->
           Task.throw $ error "TODO cannot diff an app"
 
         Project.Pkg (Project.PkgInfo name _ _ _ _ _ _ _ _) ->

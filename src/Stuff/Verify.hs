@@ -78,7 +78,7 @@ checkSolution project =
 checkSolutionHelp :: Project -> Map Name Version -> Bool
 checkSolutionHelp project solution =
   case project of
-    App info _ ->
+    App info ->
       solution == Project.appSolution info
 
     Pkg info ->

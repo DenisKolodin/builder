@@ -154,7 +154,7 @@ checkTag project path tag =
 
     Compiler.Port ->
       case project of
-        Project.App _ _ ->
+        Project.App _ ->
           return ()
 
         Project.Pkg _ ->

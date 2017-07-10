@@ -33,7 +33,7 @@ import qualified Stuff.Paths as Path
 publish :: Summary.Summary -> Task.Task ()
 publish summary@(Summary.Summary _ project _ _ _) =
   case project of
-    Project.App _ _ ->
+    Project.App _ ->
       Task.throw Error.CannotPublishApp
 
     Project.Pkg (Project.PkgInfo name smry _ version exposed _ _ _ _) ->

@@ -32,7 +32,7 @@ import qualified Reporting.Task as Task
 bump :: Summary.Summary -> Task.Task ()
 bump summary@(Summary.Summary root project _ _ _) =
   case project of
-    Project.App _ _ ->
+    Project.App _ ->
       Task.throw Error.CannotBumpApp
 
     Project.Pkg info@(Project.PkgInfo name _ _ version _ _ _ _ _) ->
