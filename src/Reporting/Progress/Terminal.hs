@@ -141,6 +141,7 @@ loopHelp chan progress state@(State total good bad) =
       let
         message =
           case (bad, total) of
+            (0, 0) -> "Success!"
             (0, 1) -> "Success! Compiled 1 module."
             (0, n) -> "Success! Compiled " ++ show n ++ " modules."
             (1, _) -> "Detected errors in 1 module."
