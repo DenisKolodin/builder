@@ -8,7 +8,6 @@ module Elm.Project.Root
   where
 
 import Control.Monad.Trans (liftIO)
-import qualified Data.ByteString.Lazy as BS
 import qualified Data.Map as Map
 import qualified System.Directory as Dir
 import System.FilePath ((</>))
@@ -21,12 +20,9 @@ import Elm.Project.Json (Project(..), PkgInfo(..))
 import Elm.Project.Summary (Summary)
 import qualified Elm.PerUserCache as PerUserCache
 import qualified File.IO as IO
-import qualified Generate.Plan as Plan
 import qualified Reporting.Error as Error
-import qualified Reporting.Error.Assets as E
 import qualified Reporting.Task as Task
 import qualified Stuff.Verify as Verify
-import qualified Json.Decode as Decode
 import qualified Json.Encode as Encode
 
 
@@ -37,13 +33,13 @@ import qualified Json.Encode as Encode
 get :: Task.Task Summary
 get =
   do  root <- moveToRoot
-      project <- readProject
+      project <- Project.read "elm.json"
       Verify.verify root project
 
 
 unsafeGet :: Task.Task (FilePath, Project)
 unsafeGet =
-  (,) <$> moveToRoot <*> readProject
+  (,) <$> moveToRoot <*> Project.read "elm.json"
 
 
 
@@ -60,59 +56,6 @@ moveToRoot =
 
         Nothing ->
           Task.throw Error.NoElmJson
-
-
-
--- READ PROJECT
-
-
-readProject :: Task.Task Project
-readProject =
-  do  elmBits <- liftIO $ BS.readFile "elm.json"
-      case Decode.parse Project.decoder elmBits of
-        Left Nothing ->
-          throw E.BadSyntax
-
-        Left (Just err) ->
-          throw (E.BadStructure err)
-
-        Right (Project.RawPkg info) ->
-          case Project.checkPkgOverlap info of
-            Just overlap ->
-              throw E.BadContent
-
-            Nothing ->
-              return (Project.Pkg info)
-
-        Right (Project.RawApp info) ->
-          case Project.checkAppOverlap info of
-            Just overlap ->
-              throw E.BadContent
-
-            Nothing ->
-              Project.App info <$> maybeReadPlan
-
-
-throw :: E.JsonProblem -> Task.Task a
-throw problem =
-  Task.throw (Error.Assets (E.BadElmJson problem))
-
-
-
--- READ BUILD PLAN
-
-
-maybeReadPlan :: Task.Task (Maybe Plan.Plan)
-maybeReadPlan =
-  do  exists <- IO.exists "elm-build-plan.json"
-      if exists
-        then Just <$> readPlan
-        else return Nothing
-
-
-readPlan :: Task.Task Plan.Plan
-readPlan =
-  Plan.parse =<< liftIO (BS.readFile "elm-build-plan.json")
 
 
 

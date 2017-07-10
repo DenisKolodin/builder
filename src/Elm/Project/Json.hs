@@ -2,18 +2,14 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Elm.Project.Json
   ( Project(..)
-  , RawProject(..)
   , AppInfo(..)
   , PkgInfo(..)
   , defaultSummary
   -- json
   , write
   , encode
-  , decoder
+  , read
   , pkgDecoder
-  -- checks
-  , checkPkgOverlap
-  , checkAppOverlap
   -- queries
   , appSolution
   , isKernel
@@ -25,14 +21,15 @@ module Elm.Project.Json
   )
   where
 
-import Data.Text (Text)
 import Prelude hiding (read)
+import Control.Monad.Trans (liftIO)
+import Data.Text (Text)
+import qualified Data.ByteString.Lazy as BS
 import qualified Data.HashMap.Lazy as HashMap
 import qualified Data.Map as Map
-import qualified Data.Set as Set
 import qualified Data.Text as Text
 import Data.Map (Map)
-import Data.Set (Set)
+import qualified System.Directory as Dir
 import System.FilePath ((</>))
 
 import qualified Elm.Compiler.Module as Module
@@ -41,9 +38,11 @@ import Elm.Package (Name, Version)
 
 import qualified Elm.Project.Constraint as Con
 import qualified Elm.Project.Licenses as Licenses
-import qualified Generate.Plan as Plan
 import qualified Json.Decode as D
 import qualified Json.Encode as E
+import qualified Reporting.Error as Error
+import qualified Reporting.Error.Assets as Error
+import qualified Reporting.Task as Task
 
 
 
@@ -51,13 +50,8 @@ import qualified Json.Encode as E
 
 
 data Project
-  = App AppInfo (Maybe Plan.Plan)
+  = App AppInfo
   | Pkg PkgInfo
-
-
-data RawProject
-  = RawApp AppInfo
-  | RawPkg PkgInfo
 
 
 
@@ -102,36 +96,6 @@ defaultSummary =
 
 
 
--- CHECKS
-
-
-checkPkgOverlap :: PkgInfo -> Maybe (Set Name)
-checkPkgOverlap (PkgInfo _ _ _ _ _ deps tests _ _) =
-  filterEmpties $
-    checkOverlap deps tests
-
-
-checkAppOverlap :: AppInfo -> Maybe (Set Name)
-checkAppOverlap (AppInfo _ _ deps tests trans) =
-  filterEmpties $
-    Set.unions
-      [ checkOverlap deps tests
-      , checkOverlap deps trans
-      , checkOverlap tests trans
-      ]
-
-
-checkOverlap :: Map Name a -> Map Name a -> Set Name
-checkOverlap deps1 deps2 =
-  Map.keysSet $ Map.intersection deps1 deps2
-
-
-filterEmpties :: Set a -> Maybe (Set a)
-filterEmpties set =
-  if Set.null set then Nothing else Just set
-
-
-
 -- QUERIES
 
 
@@ -147,7 +111,7 @@ appSolution info =
 isKernel :: Project -> Bool
 isKernel project =
   case project of
-    App _ _ ->
+    App _ ->
       False
 
     Pkg info ->
@@ -161,7 +125,7 @@ isKernel project =
 isPackageRoot :: Module.Raw -> Project -> Bool
 isPackageRoot name project =
   case project of
-    App _ _ ->
+    App _ ->
       False
 
     Pkg info ->
@@ -171,7 +135,7 @@ isPackageRoot name project =
 get :: (AppInfo -> a) -> (PkgInfo -> a) -> Project -> a
 get appFunc pkgFunc project =
   case project of
-    App info _ ->
+    App info ->
       appFunc info
 
     Pkg info ->
@@ -209,7 +173,7 @@ write root project =
 encode :: Project -> E.Value
 encode project =
   case project of
-    App (AppInfo elm srcDirs deps tests trans) _ ->
+    App (AppInfo elm srcDirs deps tests trans) ->
       E.object
         [ "type" ==> E.string "application"
         , "source-directories" ==> E.list E.string srcDirs
@@ -256,18 +220,67 @@ encodeVersion version =
 
 
 
+-- PARSE AND VERIFY
+
+
+read :: FilePath -> Task.Task Project
+read path =
+  do  bytes <- liftIO $ BS.readFile path
+      case D.parse decoder bytes of
+        Left Nothing ->
+          throwBadJson Error.BadSyntax
+
+        Left (Just err) ->
+          throwBadJson (Error.BadStructure err)
+
+        Right project@(Pkg (PkgInfo _ _ _ _ _ deps tests _ _)) ->
+          do  checkOverlap "dependencies" "test-dependencies" deps tests
+              return project
+
+        Right project@(App (AppInfo _ srcDirs deps tests trans)) ->
+          do  checkOverlap "dependencies" "test-dependencies" deps tests
+              checkOverlap "dependencies" "transitive-dependencies" deps trans
+              checkOverlap "test-dependencies" "transitive-dependencies" tests trans
+              mapM_ doesDirectoryExist srcDirs
+              return project
+
+
+throwBadJson :: Error.BadJson Error.ElmJsonProblem -> Task.Task a
+throwBadJson problem =
+  Task.throw (Error.Assets (Error.BadElmJson problem))
+
+
+checkOverlap :: String -> String -> Map Name a -> Map Name a -> Task.Task ()
+checkOverlap field1 field2 deps1 deps2 =
+  case Map.keys (Map.intersection deps1 deps2) of
+    [] ->
+      return ()
+
+    dup : dups ->
+      throwBadJson (Error.BadContent (Error.BadDepDup field1 field2 dup dups))
+
+
+doesDirectoryExist :: FilePath -> Task.Task ()
+doesDirectoryExist dir =
+  do  exists <- liftIO $ Dir.doesDirectoryExist dir
+      if exists
+        then return ()
+        else throwBadJson (Error.BadContent (Error.BadSrcDir dir))
+
+
+
 -- JSON DECODE
 
 
-decoder :: D.Decoder RawProject
+decoder :: D.Decoder Project
 decoder =
   do  tipe <- D.field "type" D.text
       case tipe of
         "application" ->
-          D.map RawApp appDecoder
+          D.map App appDecoder
 
         "package" ->
-          D.map RawPkg pkgDecoder
+          D.map Pkg pkgDecoder
 
         _ ->
           D.fail "\"application\" or \"package\""
@@ -369,6 +382,3 @@ licenseDecoder =
 
         Right license ->
           D.succeed license
-
-
-
