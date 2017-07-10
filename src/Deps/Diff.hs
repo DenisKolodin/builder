@@ -18,7 +18,6 @@ import Control.Monad (zipWithM)
 import Data.Function (on)
 import qualified Data.List as List
 import qualified Data.Map as Map
-import Data.Monoid ((<>))
 import qualified Data.Set as Set
 import qualified Data.Text as Text
 import Data.Text (Text)
