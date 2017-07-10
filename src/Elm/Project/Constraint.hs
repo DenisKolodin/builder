@@ -88,38 +88,47 @@ opToText op =
       "<="
 
 
-fromText :: Text -> Maybe Constraint
+fromText :: Text -> Either String Constraint
 fromText text =
   case Text.splitOn " " text of
     [lower, lowerOp, "v", upperOp, upper] ->
-      do  lo <- versionFromText lower
+      do  lo <- versionFromText "lower" lower
           lop <- opFromText lowerOp
           hop <- opFromText upperOp
-          hi <- versionFromText upper
-          guard (lo <= hi)
-          return (Range lo lop hop hi)
+          hi <- versionFromText "upper" upper
+          if lo < hi
+            then Right (Range lo lop hop hi)
+            else
+              Left $
+                "The lower bound (" ++ Text.unpack lower
+                ++ ") must be less than the upper bound ("
+                ++ Text.unpack upper ++ ")"
 
     _ ->
-      Nothing
+      Left "The standard format is \"1.0.0 <= v < 2.0.0\""
 
 
-versionFromText :: Text -> Maybe Version
-versionFromText text =
-  either (const Nothing) Just $
-    Pkg.versionFromText text
+versionFromText :: String -> Text -> Either String Version
+versionFromText lowerOrUpper text =
+  case Pkg.versionFromText text of
+    Right vsn ->
+      Right vsn
+
+    Left _ ->
+      Left $ "The " ++ lowerOrUpper ++ " bound (" ++ Text.unpack text ++ ") is not a valid version number."
 
 
-opFromText :: Text -> Maybe Op
+opFromText :: Text -> Either String Op
 opFromText text =
   case text of
     "<=" ->
-      Just LessOrEqual
+      Right LessOrEqual
 
     "<" ->
-      Just Less
+      Right Less
 
     _ ->
-      Nothing
+      Left $ "The operator (" ++ Text.unpack text ++ ") is not valid. Must be (<=) or (<)."
 
 
 

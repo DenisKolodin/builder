@@ -329,12 +329,7 @@ versionDecoder =
 constraintDecoder :: D.Decoder Con.Constraint
 constraintDecoder =
   do  txt <- D.text
-      case Con.fromText txt of
-        Just constraint ->
-          D.succeed constraint
-
-        Nothing ->
-          D.fail "a valid constraint, like \"1.0.0 <= v < 2.0.0\""
+      either D.fail D.succeed (Con.fromText txt)
 
 
 depsDecoder :: D.Decoder a -> D.Decoder (Map Name a)
