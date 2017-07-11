@@ -72,6 +72,9 @@ data Error
   | CannotPublishApp
   | PublishWithoutSummary
   | PublishWithoutExposed
+  | PublishWithoutReadme
+  | PublishWithShortReadme
+  | PublishWithoutLicense
 
 
 

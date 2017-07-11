@@ -83,7 +83,9 @@ data Outcome = Good | Bad
 
 
 data PublishPhase
-  = CheckTag Version
+  = CheckReadme
+  | CheckLicense
+  | CheckTag Version
   | CheckDownload
   | CheckBuild
   | CheckChanges

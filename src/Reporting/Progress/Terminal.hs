@@ -286,6 +286,18 @@ data ChecklistMessages =
 toChecklistMessages :: PublishPhase -> ChecklistMessages
 toChecklistMessages phase =
   case phase of
+    CheckReadme ->
+      ChecklistMessages
+        "Looking for README.md"
+        "Found README.md"
+        "Problem with your README.md"
+
+    CheckLicense ->
+      ChecklistMessages
+        "Looking for LICENSE"
+        "Found LICENSE"
+        "Problem with your LICENSE"
+
     CheckTag version ->
       ChecklistMessages
         ("Is version " ++ Pkg.versionToString version ++ " tagged on GitHub?")

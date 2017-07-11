@@ -10,6 +10,8 @@ import qualified Data.Map as Map
 import qualified Data.Text as Text
 import qualified System.Directory as Dir
 import qualified System.Exit as Exit
+import System.FilePath ((</>))
+import qualified System.IO as IO
 import qualified System.Process as Process
 
 import qualified Deps.Diff as Diff
@@ -31,7 +33,7 @@ import qualified Stuff.Paths as Path
 
 
 publish :: Summary.Summary -> Task.Task ()
-publish summary@(Summary.Summary _ project _ _ _) =
+publish summary@(Summary.Summary root project _ _ _) =
   case project of
     Project.App _ ->
       Task.throw Error.CannotPublishApp
@@ -46,6 +48,8 @@ publish summary@(Summary.Summary _ project _ _ _) =
           when (null exposed)    $ Task.throw Error.PublishWithoutExposed
           when (badSummary smry) $ Task.throw Error.PublishWithoutSummary
 
+          verifyReadme root
+          verifyLicense root
           verifyVersion summary name version maybePublishedVersions
           commitHash <- verifyTag name version
           verifyNoChanges commitHash
@@ -56,9 +60,51 @@ publish summary@(Summary.Summary _ project _ _ _) =
           Task.report Progress.PublishEnd
 
 
+
+-- VERIFY SUMMARY
+
+
 badSummary :: Text.Text -> Bool
 badSummary summary =
   Text.null summary || Project.defaultSummary == summary
+
+
+
+-- VERIFY README
+
+
+verifyReadme :: FilePath -> Task.Task ()
+verifyReadme root =
+  phase Progress.CheckReadme $
+    do  let readmePath = root </> "README.md"
+        exists <- liftIO $ Dir.doesFileExist readmePath
+        case exists of
+          False ->
+            Task.throw Error.PublishWithoutReadme
+
+          True ->
+            do  size <- liftIO $ IO.withFile readmePath IO.ReadMode IO.hFileSize
+                if size < 300
+                  then Task.throw Error.PublishWithShortReadme
+                  else return ()
+
+
+
+-- VERIFY LICENSE
+
+
+verifyLicense :: FilePath -> Task.Task ()
+verifyLicense root =
+  phase Progress.CheckLicense $
+    do  let licensePath = root </> "LICENSE"
+        exists <- liftIO $ Dir.doesFileExist licensePath
+        if exists
+          then return ()
+          else Task.throw Error.PublishWithoutLicense
+
+
+
+-- VERIFY GITHUB TAG
 
 
 verifyTag :: Pkg.Name -> Pkg.Version -> Task.Task String
@@ -66,6 +112,10 @@ verifyTag name version =
   phase (Progress.CheckTag version) $
     Website.githubCommit name version `catchError` \_ ->
       Task.throw (Error.MissingTag version)
+
+
+
+-- VERIFY NO LOCAL CHANGES SINCE TAG
 
 
 verifyNoChanges :: String -> Task.Task ()
@@ -87,6 +137,10 @@ verifyNoChanges commitHash =
 
                   Exit.ExitFailure _ ->
                     Task.throw (error "TODO local modules do not match")
+
+
+
+-- VERIFY THAT ZIP BUILDS / COMPUTE HASH
 
 
 verifyZip :: Pkg.Name -> Pkg.Version -> Task.Task Website.Sha
