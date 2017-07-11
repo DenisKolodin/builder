@@ -186,7 +186,7 @@ loopHelp chan progress state@(State total good bad) =
 
     UnableToLoadLatestPackages ->
       do  putStrLn ""
-          Help.toStdout $ P.dullyellow (P.text "WARNING:") <+> P.text "I normally check <https://package.elm-lang.org> for new packages"
+          Help.toStdout $ P.dullyellow (P.text "WARNING:") <+> P.text "I normally check <https://package.elm-lang.org> for new packages\n"
           putStrLn "here, but my request failed. Are you offline? I will try to continue anyway.\n"
           loop chan state
 
