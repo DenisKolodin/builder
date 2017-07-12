@@ -119,7 +119,7 @@ isKernel project =
         (Pkg.Name user _) =
           _pkg_name info
       in
-        user == "elm-lang" || user == "elm-exploration"
+        user == "elm-lang" || user == "elm-explorations"
 
 
 isPackageRoot :: Module.Raw -> Project -> Bool
