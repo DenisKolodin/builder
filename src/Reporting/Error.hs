@@ -114,10 +114,10 @@ toDoc err =
       error ("TODO BadDep " ++ Pkg.toString name ++ " " ++ Pkg.versionToString version)
 
     BadCrawlRoot err ->
-      error ("TODO crawl root")
+      error $ "TODO problem at the root\n" ++ Crawl.toString err
 
     BadCrawl errors ->
-      error ("TODO crawl " ++ show (Map.map Crawl.toString errors))
+      error $ "TODO crawl\n" ++ unlines (map Crawl.toString (Map.elems errors))
 
     Cycle names ->
       error ("TODO cycle " ++ show names)

@@ -1,4 +1,5 @@
 {-# OPTIONS_GHC -Wall #-}
+{-# LANGUAGE OverloadedStrings #-}
 module Reporting.Error.Crawl
   ( Error(..)
   , toString
@@ -29,22 +30,22 @@ toString :: Error -> String
 toString err =
   case err of
     NotFound maybeParent ->
-      "NotFound " ++ show maybeParent
+      "TODO NotFound " ++ show maybeParent
 
     Duplicates paths pkgs ->
-      "Duplicates " ++ show paths
+      "TODO Duplicates " ++ show paths
 
-    BadHeader path _ ->
-      "BadHeader " ++ show path
+    BadHeader path err ->
+      "TODO BadHeader\n\n" ++ show (Compiler.errorToDoc Compiler.dummyLocalizer path "1234567890123456789012345678901234567890" err)
 
     NoName path name ->
-      "NoName " ++ show (path, name)
+      "TODO NoName " ++ show (path, name)
 
     BadName path name ->
-      "BadName " ++ show (path, name)
+      "TODO BadName " ++ show (path, name)
 
     PortsInPackage path ->
-      "PortsInPackage " ++ show path
+      "TODO PortsInPackage " ++ path
 
     EffectsUnexpected path ->
-      "EffectsUnexpected " ++ show path
+      "TODO EffectsUnexpected " ++ path
