@@ -34,7 +34,7 @@ Flag dev {
 
 Library
     if flag(dev)
-        ghc-options: -O0 -W
+        ghc-options: -O0 -Wall
     else
         ghc-options: -threaded -O2 -fsimpl-tick-factor=140
 
@@ -82,7 +82,10 @@ Library
         Reporting.Error.Assets,
         Reporting.Error.Compile,
         Reporting.Error.Crawl,
+        Reporting.Error.Deps,
         Reporting.Error.Help,
+        Reporting.Error.Http,
+        Reporting.Error.Json,
         Reporting.Progress,
         Reporting.Progress.Bar,
         Reporting.Task.Http,

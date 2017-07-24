@@ -18,7 +18,6 @@ module Elm.Project.Constraint
   )
   where
 
-import Control.Monad (guard)
 import qualified Data.Text as Text
 import Data.Text (Text)
 

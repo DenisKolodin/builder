@@ -34,6 +34,7 @@ import Elm.Package (Name, Version)
 import qualified Elm.Package as Pkg
 import qualified Json.Decode as Decode
 
+import qualified Reporting.Error.Http as E
 import qualified Reporting.Progress as Progress
 import qualified Reporting.Task as Task
 import qualified Reporting.Task.Http as Http
@@ -130,7 +131,7 @@ fetchJson decoder path =
             return $ Right value
 
           Left jsonProblem ->
-            return $ Left "I received corrupt JSON from server. TODO explain jsonProblem"
+            return $ Left $ E.BadJson jsonProblem
 
 
 
@@ -180,7 +181,7 @@ endpointDecoder =
 -- DOWNLOAD ZIP ARCHIVE
 
 
-downloadArchive :: FilePath -> Name -> Version -> String -> Client.Response Client.BodyReader -> IO (Either String ())
+downloadArchive :: FilePath -> Name -> Version -> String -> Client.Response Client.BodyReader -> IO (Either E.Error ())
 downloadArchive cache name version expectedHash response =
   do  result <- readArchive (Client.responseBody response) initialArchiveState
       case result of
@@ -191,9 +192,7 @@ downloadArchive cache name version expectedHash response =
           if expectedHash == SHA.showDigest sha then
             Right <$> writeArchive archive (cache </> Pkg.toFilePath name) (Pkg.versionToString version)
           else
-            return $ Left $
-              "Expecting hash of content to be " ++ expectedHash
-              ++ ", but it is " ++ SHA.showDigest sha
+            return $ Left $ E.BadZipSha expectedHash (SHA.showDigest sha)
 
 
 
@@ -216,11 +215,11 @@ initialArchiveState =
 type Sha = SHA.Digest SHA.SHA1State
 
 
-readArchive :: Client.BodyReader -> ArchiveState -> IO (Either String (Sha, Zip.Archive))
+readArchive :: Client.BodyReader -> ArchiveState -> IO (Either E.Error (Sha, Zip.Archive))
 readArchive body (AS len sha zip) =
   case zip of
     Binary.Fail _ _ _ ->
-      return $ Left "seems like the .zip is corrupted"
+      return $ Left E.BadZipData
 
     Binary.Partial k ->
       do  chunk <- Client.brRead body
@@ -279,7 +278,7 @@ githubCommit name version =
               return $ Right value
 
             Left jsonProblem ->
-              return $ Left "I received corrupt JSON from GitHub. TODO explain jsonProblem"
+              return $ Left $ E.BadJson jsonProblem
 
 
 
@@ -296,7 +295,7 @@ githubDownload name version dir =
       Client.withResponse request manager (githubDownloadHelp dir)
 
 
-githubDownloadHelp :: FilePath -> Client.Response Client.BodyReader -> IO (Either String Sha)
+githubDownloadHelp :: FilePath -> Client.Response Client.BodyReader -> IO (Either E.Error Sha)
 githubDownloadHelp targetDir response =
   do  result <- readArchive (Client.responseBody response) initialArchiveState
       case result of

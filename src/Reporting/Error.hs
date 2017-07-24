@@ -25,8 +25,9 @@ import Deps.Diff (Magnitude)
 import qualified Reporting.Error.Assets as Asset
 import qualified Reporting.Error.Compile as Compile
 import qualified Reporting.Error.Crawl as Crawl
+import qualified Reporting.Error.Deps as Deps
 import qualified Reporting.Error.Help as Help
-import Reporting.Error.Help (reflow, stack)
+import qualified Reporting.Error.Http as Http
 
 
 
@@ -36,20 +37,12 @@ import Reporting.Error.Help (reflow, stack)
 data Error
   = NoElmJson
   | Assets Asset.Error
-  | BadDep Name Version
+  | BadDeps Deps.Error
   | BadCrawlRoot Crawl.Error
   | BadCrawl (Map.Map Module.Raw Crawl.Error)
   | Cycle [Module.Raw] -- TODO write docs to help with this scenario
   | Compile (Map.Map Module.Raw Compile.Error) -- TODO sort compile errors by edit time
-
-  -- verify
-  | AppBadElm Version
-  | AppBadDeps
-  | PkgBadElm Constraint
-  | PkgBadDeps
-
-  -- http
-  | HttpRequestFailed String String
+  | BadHttp String Http.Error
 
   -- install
   | NoSolution [Name]
@@ -110,8 +103,8 @@ toDoc err =
     Assets assetError ->
       Asset.toDoc assetError
 
-    BadDep name version ->
-      error ("TODO BadDep " ++ Pkg.toString name ++ " " ++ Pkg.versionToString version)
+    BadDeps depsError ->
+      Deps.toDoc depsError
 
     BadCrawlRoot err ->
       error $ "TODO problem at the root\n" ++ Crawl.toString err
@@ -125,26 +118,8 @@ toDoc err =
     Compile errors ->
       P.vcat (concatMap Compile.toDocs (Map.elems errors))
 
-    AppBadElm version ->
-      error ("TODO AppBadElm - " ++ Pkg.versionToString version)
-
-    AppBadDeps ->
-      error "TODO AppBadDeps"
-
-    PkgBadElm constraint ->
-      error ("TODO PkgBadElm " ++ Con.toString constraint)
-
-    PkgBadDeps ->
-      error "TODO PkgBadDeps"
-
-    HttpRequestFailed url message ->
-      Help.makeErrorDoc
-        ( "The following HTTP request failed:"
-        )
-        [ P.indent 4 $ P.dullyellow $ P.text $ "<" ++ url ++ ">"
-        , P.text "Here is the error message I was able to extract:"
-        , P.indent 4 $ reflow message
-        ]
+    BadHttp url err ->
+      Http.toDoc url err
 
     NoSolution badPackages ->
       error $
@@ -212,7 +187,7 @@ toDoc err =
             ++ Pkg.versionToString vsn
             ++ ", but I cannot find that version on <http://package.elm-lang.org>."
           )
-          [ reflow $
+          [ Help.reflow $
               "Try again after changing the version in elm.json" ++ list
           ]
 
@@ -222,7 +197,7 @@ toDoc err =
           ++ Pkg.versionToString statedVersion ++ ", but that is not valid\
           \ based on the previously published versions."
         )
-        [ reflow $
+        [ Help.reflow $
             "Generally, you want to put the most recently published version ("
             ++ Pkg.versionToString latestVersion
             ++ " for this package) in your elm.json and run `elm bump` to figure out what should come next."
@@ -237,12 +212,12 @@ toDoc err =
         [ P.indent 4 $ P.text $
             "elm diff " ++ Pkg.versionToString old
 
-        , reflow $
+        , Help.reflow $
           "This command says this is a " ++ error "TODO realMagnitude" realMagnitude
           ++ " change, so the next version should be "
           ++ Pkg.versionToString realNew
           ++ ". Double check everything to make sure you are publishing what you want!"
-        , reflow $
+        , Help.reflow $
             "Also, next time use `elm bump` and I'll figure all this out for you!"
         ]
 
@@ -262,20 +237,20 @@ hintToDoc :: Hint -> P.Doc
 hintToDoc hint =
   case hint of
     EmptyConstraint name constraint ->
-      stack
-        [ reflow $ "Your elm.json has the following dependency:"
+      Help.stack
+        [ Help.reflow $ "Your elm.json has the following dependency:"
         , P.indent 4 $ P.text $ showDependency name constraint
-        , reflow $
+        , Help.reflow $
             "But there are no released versions in that range! I recommend\
             \ removing that constraint by hand and adding it back with:"
         , P.indent 4 $ P.text $ "elm install " ++ Pkg.toString name
         ]
 
     IncompatibleConstraint name constraint viableVersion ->
-      stack
-        [ reflow $ "Your elm.json has the following dependency:"
+      Help.stack
+        [ Help.reflow $ "Your elm.json has the following dependency:"
         , P.indent 4 $ P.text $ showDependency name constraint
-        , reflow $
+        , Help.reflow $
             "But none of the versions in that range work with Elm "
             ++ Pkg.versionToString Compiler.version ++ ". I recommend removing\
             \ that dependency by hand and adding it back with:"

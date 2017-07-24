@@ -35,6 +35,7 @@ import qualified File.Crawl as Crawl
 import qualified File.IO as IO
 import qualified File.Plan as Plan
 import qualified Reporting.Error as Error
+import qualified Reporting.Error.Deps as E
 import qualified Reporting.Progress as Progress
 import qualified Reporting.Task as Task
 import qualified Stuff.Paths as Paths
@@ -52,6 +53,11 @@ verify root project =
       return (solution, summary)
 
 
+throw :: E.Error -> Task.Task a
+throw err =
+  Task.throw (Error.BadDeps err)
+
+
 
 -- VERIFY SOLUTION
 
@@ -59,7 +65,7 @@ verify root project =
 verifyApp :: AppInfo -> Task.Task (Map Name Version)
 verifyApp info =
   if _app_elm_version info /= Compiler.version then
-    Task.throw (Error.AppBadElm (_app_elm_version info))
+    throw (E.AppBadElm (_app_elm_version info))
 
   else
     do  let oldSolution = Project.appSolution info
@@ -67,7 +73,7 @@ verifyApp info =
         maybeSolution <- Explorer.run (Solver.run solver)
         case maybeSolution of
           Nothing ->
-            Task.throw Error.AppBadDeps
+            throw E.BadDeps
 
           Just solution ->
             return solution
@@ -76,7 +82,7 @@ verifyApp info =
 verifyPkg :: PkgInfo -> Task.Task (Map Name Version)
 verifyPkg info =
   if not (Con.goodElm (_pkg_elm_version info)) then
-    Task.throw (Error.PkgBadElm (_pkg_elm_version info))
+    throw (E.PkgBadElm (_pkg_elm_version info))
 
   else
     do  let deps = Map.union (_pkg_deps info) (_pkg_test_deps info)
@@ -84,7 +90,7 @@ verifyPkg info =
         maybeSolution <- Explorer.run (Solver.run solver)
         case maybeSolution of
           Nothing ->
-            Task.throw Error.PkgBadDeps
+            throw E.BadDeps
 
           Just solution ->
             return solution
@@ -147,12 +153,12 @@ verifyBuild pkgInfoMVar ifacesMVar name version =
             depAnswers <- traverse readMVar depsMVars
 
             answer <- ifNotBlocked depAnswers $ \infos ->
-              do  ifaces <- readMVar ifacesMVar
-                  either <- runner (getIface name version info infos ifaces)
-                  case either of
+              do  ifacesBefore <- readMVar ifacesMVar
+                  result <- runner (getIface name version info infos ifacesBefore)
+                  case result of
                     Right ifaces ->
-                      do  latest <- takeMVar ifacesMVar
-                          putMVar ifacesMVar (Map.union latest ifaces)
+                      do  ifacesNow <- takeMVar ifacesMVar
+                          putMVar ifacesMVar (Map.union ifacesNow ifaces)
                           return (Ok info)
 
                     Left _ ->
@@ -184,7 +190,7 @@ toInfo _ answer =
       return Nothing
 
     Err name version ->
-      Task.throw (Error.BadDep name version)
+      throw (E.BuildFailure name version)
 
 
 ifNotBlocked :: Map Name Answer -> (Map Name PkgInfo -> IO Answer) -> IO Answer
@@ -233,7 +239,7 @@ getIface name version info infos depIfaces =
               (dirty, cachedIfaces) <- Plan.plan summary graph
               answers <- Compile.compile (Pkg info) cachedIfaces dirty
               results <- Artifacts.ignore answers
-              Artifacts.writeDocs (root </> "docs.json") results
+              _ <- Artifacts.writeDocs (root </> "docs.json") results
 
               Paths.removeStuff root
 

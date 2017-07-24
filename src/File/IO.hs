@@ -31,7 +31,7 @@ import qualified System.IO as IO
 import System.IO.Error (ioeGetErrorType, annotateIOError, modifyIOError)
 
 import qualified Reporting.Error as Error
-import qualified Reporting.Error.Assets as AError
+import qualified Reporting.Error.Assets as E
 import qualified Reporting.Task as Task
 
 
@@ -49,8 +49,8 @@ writeBinary path value =
 
 readBinary :: (Binary.Binary a) => FilePath -> Task.Task a
 readBinary path =
-  do  exists <- liftIO (Dir.doesFileExist path)
-      if not exists
+  do  exists_ <- liftIO (Dir.doesFileExist path)
+      if not exists_
         then throwCorruptBinary path
         else
           do  result <- liftIO (Binary.decodeFileOrFail path)
@@ -64,7 +64,7 @@ readBinary path =
 
 throwCorruptBinary :: FilePath -> Task.Task a
 throwCorruptBinary filePath =
-  Task.throw (Error.Assets (AError.CorruptBinary filePath))
+  Task.throw (Error.Assets (E.CorruptBinary filePath))
 
 
 
@@ -97,8 +97,8 @@ readUtf8 filePath =
 
 
 encodingError :: FilePath -> IOError -> IOError
-encodingError filePath ioError =
-  case ioeGetErrorType ioError of
+encodingError filePath ioErr =
+  case ioeGetErrorType ioErr of
     InvalidArgument ->
       annotateIOError
         (userError "Bad encoding; the file must be valid UTF-8")
@@ -107,7 +107,7 @@ encodingError filePath ioError =
         (Just filePath)
 
     _ ->
-      ioError
+      ioErr
 
 
 
@@ -177,16 +177,16 @@ exists filePath =
 remove :: FilePath -> Task.Task ()
 remove filePath =
   liftIO $
-    do  exists <- Dir.doesFileExist filePath
-        if exists
+    do  exists_ <- Dir.doesFileExist filePath
+        if exists_
           then Dir.removeFile filePath
           else return ()
 
 
 removeDir :: FilePath -> IO ()
 removeDir path =
-  do  exists <- Dir.doesDirectoryExist path
-      if exists
+  do  exists_ <- Dir.doesDirectoryExist path
+      if exists_
         then Dir.removeDirectoryRecursive path
         else return ()
 
@@ -207,8 +207,8 @@ findHelp name dirs =
     return Nothing
 
   else
-    do  exists <- Dir.doesFileExist (FP.joinPath dirs </> name)
-        if exists
+    do  exists_ <- Dir.doesFileExist (FP.joinPath dirs </> name)
+        if exists_
           then return (Just (FP.joinPath dirs))
           else findHelp name (init dirs)
 

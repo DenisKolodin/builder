@@ -13,7 +13,6 @@ import qualified Data.Binary as Binary
 import Data.Map (Map)
 import qualified Data.Map as Map
 import qualified Data.Maybe as Maybe
-import System.FilePath ((</>))
 
 import qualified Elm.Compiler as Compiler
 import qualified Elm.Compiler.Module as Module

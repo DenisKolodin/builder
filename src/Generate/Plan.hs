@@ -50,22 +50,14 @@ data Page =
 parse :: BS.ByteString -> Task.Task Plan
 parse bytestring =
   case D.parse planDecoder bytestring of
-    Left Nothing ->
-      throw E.BadSyntax
-
-    Left (Just err) ->
-      throw (E.BadStructure err)
+    Left err ->
+      throw (E.BadPlanJson err)
 
     Right plan ->
-      case detectProblems plan of
-        Nothing ->
-          return plan
-
-        Just problem ->
-          throw (E.BadContent problem)
+      maybe (return plan) throw (detectProblems plan)
 
 
-throw :: E.BadJson E.BuildPlanProblem -> Task.Task a
+throw :: E.BuildPlanProblem -> Task.Task a
 throw problem =
   Task.throw (Error.Assets (E.BadBuildPlan problem))
 

@@ -28,6 +28,7 @@ import qualified Network.HTTP.Types as Http
 import qualified Elm.Compiler as Compiler
 import qualified Elm.Package as Pkg
 import qualified Reporting.Error as Error
+import qualified Reporting.Error.Http as E
 import qualified Reporting.Progress as Progress
 import qualified Reporting.Task as Task
 
@@ -45,7 +46,7 @@ data Fetch a where
 
 
 type Handler a =
-  Http.Request -> Http.Manager -> IO (Either String a)
+  Http.Request -> Http.Manager -> IO (Either E.Error a)
 
 
 package :: String -> [(String,String)] -> Handler a -> Fetch a
@@ -179,15 +180,15 @@ fetchUnsafe url manager handler =
         Right value ->
           return (Right value)
 
-        Left msg ->
-          return (Left (Error.HttpRequestFailed url msg))
+        Left problem ->
+          return (Left (Error.BadHttp url problem))
 
 
 handleHttpError :: String -> Http.HttpException -> IO (Either Error.Error a)
 handleHttpError url exception =
   case exception of
     Http.StatusCodeException (Http.Status _code err) headers _ ->
-      return $ Left $ Error.HttpRequestFailed url $ BSC.unpack $
+      return $ Left $ Error.BadHttp url $ E.Unknown $ BSC.unpack $
         case List.lookup "X-Response-Body-Start" headers of
           Just msg | not (BSC.null msg) ->
             msg
@@ -201,4 +202,4 @@ handleHttpError url exception =
 
 handleAnyError :: (Exception e) => String -> e -> IO (Either Error.Error a)
 handleAnyError url exception =
-  return $ Left $ Error.HttpRequestFailed url (show exception)
+  return $ Left $ Error.BadHttp url $ E.Unknown $ show exception

@@ -41,7 +41,7 @@ import qualified Elm.Project.Licenses as Licenses
 import qualified Json.Decode as D
 import qualified Json.Encode as E
 import qualified Reporting.Error as Error
-import qualified Reporting.Error.Assets as Error
+import qualified Reporting.Error.Assets as E
 import qualified Reporting.Task as Task
 
 
@@ -227,11 +227,8 @@ read :: FilePath -> Task.Task Project
 read path =
   do  bytes <- liftIO $ BS.readFile path
       case D.parse decoder bytes of
-        Left Nothing ->
-          throwBadJson Error.BadSyntax
-
-        Left (Just err) ->
-          throwBadJson (Error.BadStructure err)
+        Left err ->
+          throwBadJson (E.BadJson err)
 
         Right project@(Pkg (PkgInfo _ _ _ _ _ deps tests _ _)) ->
           do  checkOverlap "dependencies" "test-dependencies" deps tests
@@ -245,9 +242,9 @@ read path =
               return project
 
 
-throwBadJson :: Error.BadJson Error.ElmJsonProblem -> Task.Task a
+throwBadJson :: E.ElmJsonProblem -> Task.Task a
 throwBadJson problem =
-  Task.throw (Error.Assets (Error.BadElmJson problem))
+  Task.throw (Error.Assets (E.BadElmJson problem))
 
 
 checkOverlap :: String -> String -> Map Name a -> Map Name a -> Task.Task ()
@@ -257,7 +254,7 @@ checkOverlap field1 field2 deps1 deps2 =
       return ()
 
     dup : dups ->
-      throwBadJson (Error.BadContent (Error.BadDepDup field1 field2 dup dups))
+      throwBadJson (E.BadDepDup field1 field2 dup dups)
 
 
 doesDirectoryExist :: FilePath -> Task.Task ()
@@ -265,7 +262,7 @@ doesDirectoryExist dir =
   do  exists <- liftIO $ Dir.doesDirectoryExist dir
       if exists
         then return ()
-        else throwBadJson (Error.BadContent (Error.BadSrcDir dir))
+        else throwBadJson (E.BadSrcDir dir)
 
 
 

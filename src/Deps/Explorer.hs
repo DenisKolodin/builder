@@ -29,7 +29,7 @@ import qualified Deps.Get as Get
 import qualified Elm.Project.Json as Project
 import Elm.Project.Constraint (Constraint)
 import qualified Reporting.Error as Error
-import qualified Reporting.Error.Assets as E
+import qualified Reporting.Error.Deps as E
 import qualified Reporting.Task as Task
 
 
@@ -73,7 +73,7 @@ getVersions name =
           return versions
 
         Nothing ->
-          throwError (Error.Assets (E.CorruptVersionCache name))
+          throwError (Error.BadDeps (E.CorruptVersionCache name))
 
 
 
