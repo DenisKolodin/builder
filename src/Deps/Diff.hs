@@ -162,8 +162,7 @@ diffType oldType newType =
         <*> diffType b b'
 
     (Type.Type oldName oldArgs, Type.Type newName newArgs) ->
-      -- TODO handle old names with no module prefixes
-      if oldName /= newName || length oldArgs /= length newArgs then
+      if not (isSameName oldName newName) || length oldArgs /= length newArgs then
         Nothing
       else
         concat <$> zipWithM diffType oldArgs newArgs
@@ -187,6 +186,23 @@ diffType oldType newType =
     (_, _) ->
       Nothing
 
+
+-- handle very old docs that do not use qualified names
+isSameName :: Text -> Text -> Bool
+isSameName oldFullName newFullName =
+  let
+    dedot name =
+      reverse (Text.splitOn "." name)
+  in
+    case ( dedot oldFullName, dedot newFullName ) of
+      (oldName:[], newName:_) ->
+        oldName == newName
+
+      (oldName:_, newName:[]) ->
+        oldName == newName
+
+      _ ->
+        oldFullName == newFullName
 
 
 diffFields :: [(Text, Type.Type)] -> [(Text, Type.Type)] -> Maybe [(Text,Text)]
