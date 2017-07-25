@@ -86,8 +86,8 @@ toDoc err =
             \ better to add dependencies with commands like this:"
         , P.indent 4 $ P.dullyellow $ P.text $ "elm install elm-lang/http"
         , Help.reflow $
-            "And remember to ask for help on the Elm slack if you are running\
-            \ into something that seems trickier than this."
+            "Please ask for help on the Elm slack <http://elmlang.herokuapp.com/> if\
+            \ you are running into something that seems trickier than this."
         ]
 
     BuildFailure pkg vsn ->
