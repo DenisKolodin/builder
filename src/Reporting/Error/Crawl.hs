@@ -130,11 +130,15 @@ errorToDoc name err =
         , "Make the change and you should be all set!"
         ]
 
-    PortsInPackage path ->
-      error $ "TODO PortsInPackage " ++ path
+    PortsInPackage _path ->
+      badTagToDoc name "ports"
+        "Packages cannot have any `port` modules."
 
-    EffectsUnexpected path ->
-      error $ "TODO EffectsUnexpected " ++ path
+    EffectsUnexpected _path ->
+      badTagToDoc name "effects"
+        "Creating `effect` modules is relatively experimental. There are a\
+        \ couple in @elm-lang repos right now, but we have decided to be\
+        \ very cautious in expanding its usage."
 
 
 badImportToDoc :: Maybe Module.Raw -> Module.Raw -> [P.Doc] -> P.Doc
@@ -157,3 +161,26 @@ badImportToDoc maybeParent name details =
 pkgToString :: Pkg.Package -> String
 pkgToString (Pkg.Package pkg vsn) =
   "exposed by " ++ Pkg.toString pkg ++ " " ++ Pkg.versionToString vsn
+
+
+learnMore :: String -> String
+learnMore page =
+  "<https://github.com/elm-lang/elm-compiler/blob/"
+  ++ Pkg.versionToString Compiler.version
+  ++ "/hints/" ++ page ++ ".md>"
+
+
+badTagToDoc :: String -> String -> String -> P.Doc
+badTagToDoc name tag summary =
+  Help.makeErrorDoc summary
+    [ P.fillSep $
+        [ "Get", "rid", "of", "all", "the"
+        , P.dullyellow (P.text tag)
+        , "stuff", "in"
+        , P.dullyellow (P.text (Module.nameToString name))
+        , "to", "proceed."
+        ]
+    , Help.reflow $
+        "This kind of decision is quite complex, and you can learn more about it here: "
+        ++ learnMore tags
+    ]
