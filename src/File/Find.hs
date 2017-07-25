@@ -60,7 +60,7 @@ find (Summary.Summary root project exposed _ _) parent name =
             locals = map toFilePath codePaths
             foreigns = maybe [] id maybePkgs
           in
-            Task.throw (E.Duplicates locals foreigns)
+            Task.throw (E.Duplicates parent locals foreigns)
 
 
 

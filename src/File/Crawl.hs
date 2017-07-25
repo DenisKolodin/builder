@@ -55,9 +55,9 @@ crawl summary args =
 
     Args.Roots paths ->
       do  headers <- Header.readManyFiles summary paths
-          let deps = concatMap (Header._imports . snd) (NonEmpty.toList headers)
           let names = NonEmpty.map fst headers
-          let unvisited = map (Unvisited Nothing) deps
+          let toUnvisited (name, header) = map (Unvisited (Just name)) (Header._imports header)
+          let unvisited = concatMap toUnvisited (NonEmpty.toList headers)
           let graph = freshGraph (Args.Roots names) (Map.fromList (NonEmpty.toList headers))
           dfs summary unvisited graph
 
@@ -87,12 +87,13 @@ dfs summary unvisited startGraph =
 
       graph <- dfsHelp summary chan 0 Set.empty unvisited startGraph
 
-      if Map.null (_problems graph)
-        then
+      case E.hasIssues (_problems graph) of
+        Nothing ->
           do  checkForCycles graph
               return (graph { _problems = () })
-        else
-          Task.throw (Error.BadCrawl (_problems graph))
+
+        Just issues ->
+          Task.throw (Error.BadCrawl issues)
 
 
 type FileResult = Either (Module.Raw, E.Error) Asset
@@ -200,7 +201,7 @@ crawlFile summary (Unvisited maybeParent name) =
                     return (Kernel name info)
 
                   Left err ->
-                    Task.throw (E.BadHeader path err)
+                    Task.throw (E.BadHeader path source err)
 
 
 

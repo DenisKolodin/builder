@@ -1,15 +1,22 @@
 {-# OPTIONS_GHC -Wall #-}
 {-# LANGUAGE OverloadedStrings #-}
 module Reporting.Error.Crawl
-  ( Error(..)
-  , toString
+  ( toDoc
+  , Error(..)
+  , Issues
+  , hasIssues
   )
   where
 
 
+import qualified Data.Map as Map
+import qualified Data.Text as Text
+import qualified Text.PrettyPrint.ANSI.Leijen as P
+
 import qualified Elm.Compiler as Compiler
 import qualified Elm.Compiler.Module as Module
 import qualified Elm.Package as Pkg
+import qualified Reporting.Error.Help as Help
 
 
 
@@ -18,34 +25,115 @@ import qualified Elm.Package as Pkg
 
 data Error
   = NotFound (Maybe Module.Raw) -- TODO suggest other names
-  | Duplicates [FilePath] [Pkg.Package]
-  | BadHeader FilePath Compiler.Error
+  | Duplicates (Maybe Module.Raw) [FilePath] [Pkg.Package]
+  | BadHeader FilePath Text.Text Compiler.Error
   | NoName FilePath Module.Raw
   | BadName FilePath Module.Raw
   | PortsInPackage FilePath
   | EffectsUnexpected FilePath
 
 
-toString :: Error -> String
-toString err =
+
+-- ISSUES
+
+
+data Issues =
+  Issues Module.Raw Error [(Module.Raw, Error)]
+
+
+hasIssues :: Map.Map Module.Raw Error -> Maybe Issues
+hasIssues errors =
+  case Map.toList errors of
+    [] ->
+      Nothing
+
+    (name, err) : others ->
+      Just (Issues name err others)
+
+
+
+-- TO DOC
+
+
+toDoc :: Issues -> P.Doc
+toDoc (Issues name err otherErrors) =
+  case otherErrors of
+    [] ->
+      errorToDoc name err
+
+    _:_ ->
+      error "TODO handle multiple crawl errors"
+
+
+errorToDoc :: Module.Raw -> Error -> P.Doc
+errorToDoc name err =
   case err of
-    NotFound maybeParent ->
-      "TODO NotFound " ++ show maybeParent
+    NotFound Nothing ->
+      badImportToDoc Nothing name $
+        [ Help.reflow $
+            "I cannot find it in your source directories though. Is there a\
+            \ typo in the module name? Or in the source directories?"
+        ]
 
-    Duplicates paths pkgs ->
-      "TODO Duplicates " ++ show paths
+    NotFound (Just parent) ->
+      badImportToDoc (Just parent) name $
+        [ Help.reflow $
+            "I cannot find it though! Try going through these questions:"
+        , P.vcat $
+            [ "  1. Is there a typo in the module name?"
+            , "  2. Is it in a package? Did you `elm install` that package yet?"
+            , "  3. Is it a local file? Is it in a source directory listed in your elm.json?"
+            ]
+        ]
 
-    BadHeader path err ->
-      "TODO BadHeader\n\n" ++ show (Compiler.errorToDoc Compiler.dummyLocalizer path "1234567890123456789012345678901234567890" err)
+    Duplicates maybeParent paths pkgs ->
+      badImportToDoc maybeParent name $
+        [ Help.reflow $
+            "I found multiple module with that name though!"
+        , P.indent 4 $ P.dullyellow $ P.vcat $ map P.text $ paths ++ map pkgToString pkgs
+        , Help.reflow $
+            if null paths then
+              "It looks like the name clash is in your dependencies, which is\
+              \ out of your control. Elm does not support this scenario right\
+              \ now, but it may be worthwhile. Please open an issue describing\
+              \ your scenario if you think this would be an improvement!"
+            else
+              "Which is the right one? Try renaming your modules to have unique names."
+        ]
+
+    BadHeader path source err ->
+      Compiler.errorToDoc Compiler.dummyLocalizer path source err
 
     NoName path name ->
-      "TODO NoName " ++ show (path, name)
+      error $ "TODO NoName " ++ show (path, name)
 
     BadName path name ->
-      "TODO BadName " ++ show (path, name)
+      error $ "TODO BadName " ++ show (path, name)
 
     PortsInPackage path ->
-      "TODO PortsInPackage " ++ path
+      error $ "TODO PortsInPackage " ++ path
 
     EffectsUnexpected path ->
-      "TODO EffectsUnexpected " ++ path
+      error $ "TODO EffectsUnexpected " ++ path
+
+
+badImportToDoc :: Maybe Module.Raw -> Module.Raw -> [P.Doc] -> P.Doc
+badImportToDoc maybeParent name details =
+  let
+    summary =
+      case maybeParent of
+        Nothing ->
+          "Your elm.json says your project has the following module:"
+
+        Just parent ->
+          "The " ++ Module.nameToString parent ++ " module imports the following module:"
+
+    problemModule =
+      P.indent 4 $ P.dullyellow $ P.text $ Module.nameToString name
+  in
+    Help.makeErrorDoc summary (problemModule:details)
+
+
+pkgToString :: Pkg.Package -> String
+pkgToString (Pkg.Package pkg vsn) =
+  "exposed by " ++ Pkg.toString pkg ++ " " ++ Pkg.versionToString vsn

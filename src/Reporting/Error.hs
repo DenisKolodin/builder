@@ -39,7 +39,7 @@ data Error
   | Assets Asset.Error
   | BadDeps Deps.Error
   | BadCrawlRoot Crawl.Error
-  | BadCrawl (Map.Map Module.Raw Crawl.Error)
+  | BadCrawl Crawl.Issues
   | Cycle [Module.Raw] -- TODO write docs to help with this scenario
   | Compile (Map.Map Module.Raw Compile.Error) -- TODO sort compile errors by edit time
   | BadHttp String Http.Error
@@ -107,10 +107,10 @@ toDoc err =
       Deps.toDoc depsError
 
     BadCrawlRoot err ->
-      error $ "TODO problem at the root\n" ++ Crawl.toString err
+      error "TODO problem at the root"
 
-    BadCrawl errors ->
-      error $ "TODO crawl\n" ++ unlines (map Crawl.toString (Map.elems errors))
+    BadCrawl issues ->
+      Crawl.toDoc issues
 
     Cycle names ->
       error ("TODO cycle " ++ show names)

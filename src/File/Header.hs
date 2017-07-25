@@ -127,7 +127,7 @@ parse project path time source =
           return ( maybeName, Info path time source deps )
 
     Left msg ->
-      Task.throw (E.BadHeader path msg)
+      Task.throw (E.BadHeader path source msg)
 
 
 
