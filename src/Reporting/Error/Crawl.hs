@@ -12,6 +12,7 @@ module Reporting.Error.Crawl
 import qualified Data.Map as Map
 import qualified Data.Text as Text
 import qualified Text.PrettyPrint.ANSI.Leijen as P
+import Text.PrettyPrint.ANSI.Leijen ((<+>))
 
 import qualified Elm.Compiler as Compiler
 import qualified Elm.Compiler.Module as Module
@@ -27,7 +28,7 @@ data Error
   = NotFound (Maybe Module.Raw) -- TODO suggest other names
   | Duplicates (Maybe Module.Raw) [FilePath] [Pkg.Package]
   | BadHeader FilePath Text.Text Compiler.Error
-  | NoName FilePath Module.Raw
+  | NoName FilePath
   | BadName FilePath Module.Raw
   | PortsInPackage FilePath
   | EffectsUnexpected FilePath
@@ -90,7 +91,8 @@ errorToDoc name err =
       badImportToDoc maybeParent name $
         [ Help.reflow $
             "I found multiple module with that name though!"
-        , P.indent 4 $ P.dullyellow $ P.vcat $ map P.text $ paths ++ map pkgToString pkgs
+        , P.indent 4 $ P.dullyellow $ P.vcat $
+            map P.text $ paths ++ map pkgToString pkgs
         , Help.reflow $
             if null paths then
               "It looks like the name clash is in your dependencies, which is\
@@ -104,11 +106,29 @@ errorToDoc name err =
     BadHeader path source err ->
       Compiler.errorToDoc Compiler.dummyLocalizer path source err
 
-    NoName path name ->
-      error $ "TODO NoName " ++ show (path, name)
+    NoName path ->
+      Help.makeErrorDoc
+        ( "The file at " ++ path ++ " must start with a line like this:"
+        )
+        [ P.indent 4 $ P.dullyellow $ P.text $
+            "module " ++ Module.nameToString name ++ " exposing (..)"
+        , Help.reflow $
+            "Ideally you can replace the (..) with an explicit list of types\
+            \ and functions you want to expose to other modules. If you know\
+            \ a value is only used WITHIN this module, it is extra easy to\
+            \ refactor. This kind of information is great, especially as your\
+            \ project grows!"
+        ]
 
-    BadName path name ->
-      error $ "TODO BadName " ++ show (path, name)
+    BadName path actualName ->
+      Help.makeErrorDoc
+        ( "The file at " ++ path ++ " has a typo in the module name. It says:"
+        )
+        [ P.indent 4 $ "module" <+> P.red (P.text (Module.nameToString actualName)) <+> "exposing (..)"
+        , "Looks like a typo or copy/paste error. Instead it needs to say:"
+        , P.indent 4 $ "module" <+> P.green (P.text (Module.nameToString name)) <+> "exposing (..)"
+        , "Make the change and you should be all set!"
+        ]
 
     PortsInPackage path ->
       error $ "TODO PortsInPackage " ++ path

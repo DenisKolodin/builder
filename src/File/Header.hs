@@ -138,7 +138,7 @@ checkName :: FilePath -> Module.Raw -> Maybe Module.Raw -> Task Module.Raw
 checkName path expectedName maybeName =
   case maybeName of
     Nothing ->
-      Task.throw (E.NoName path expectedName)
+      Task.throw (E.NoName path)
 
     Just actualName ->
       if expectedName == actualName
