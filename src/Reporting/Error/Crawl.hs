@@ -131,11 +131,11 @@ errorToDoc name err =
         ]
 
     PortsInPackage _path ->
-      badTagToDoc name "ports"
+      badTagToDoc name "port" "port-modules" $
         "Packages cannot have any `port` modules."
 
     EffectsUnexpected _path ->
-      badTagToDoc name "effects"
+      badTagToDoc name "effect" "effect-modules" $
         "Creating `effect` modules is relatively experimental. There are a\
         \ couple in @elm-lang repos right now, but we have decided to be\
         \ very cautious in expanding its usage."
@@ -163,15 +163,8 @@ pkgToString (Pkg.Package pkg vsn) =
   "exposed by " ++ Pkg.toString pkg ++ " " ++ Pkg.versionToString vsn
 
 
-learnMore :: String -> String
-learnMore page =
-  "<https://github.com/elm-lang/elm-compiler/blob/"
-  ++ Pkg.versionToString Compiler.version
-  ++ "/hints/" ++ page ++ ".md>"
-
-
-badTagToDoc :: String -> String -> String -> P.Doc
-badTagToDoc name tag summary =
+badTagToDoc :: String -> String -> String -> String -> P.Doc
+badTagToDoc name tag hintName summary =
   Help.makeErrorDoc summary
     [ P.fillSep $
         [ "Get", "rid", "of", "all", "the"
@@ -182,5 +175,5 @@ badTagToDoc name tag summary =
         ]
     , Help.reflow $
         "This kind of decision is quite complex, and you can learn more about it here: "
-        ++ learnMore tags
+        ++ Help.hintLink hintName
     ]

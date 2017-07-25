@@ -1,7 +1,8 @@
 {-# OPTIONS_GHC -Wall #-}
 {-# LANGUAGE OverloadedStrings #-}
 module Reporting.Error.Help
-  ( stack
+  ( hintLink
+  , stack
   , reflow
   , makeErrorDoc
   , toString
@@ -21,7 +22,19 @@ import Text.PrettyPrint.ANSI.Leijen
   , plain, red, renderPretty, text, underline
   )
 
+import qualified Elm.Compiler as Compiler
 import qualified Elm.Package as Pkg
+
+
+
+-- HINT LINKS
+
+
+hintLink :: String -> String
+hintLink hintName =
+  "<https://github.com/elm-lang/elm-compiler/blob/"
+  ++ Pkg.versionToString Compiler.version
+  ++ "/hints/" ++ hintName ++ ".md>"
 
 
 

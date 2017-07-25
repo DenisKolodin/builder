@@ -113,7 +113,14 @@ toDoc err =
       Crawl.toDoc issues
 
     Cycle names ->
-      error ("TODO cycle " ++ show names)
+      Help.makeErrorDoc
+        "Your module imports form a cycle:"
+        [ P.indent 4 (Utils.drawCycle names)
+        , Help.reflow $
+            "Learn more about why this is disallowed and how to break cycles here:"
+            ++ Help.hintLink "module-cycles"
+        ]
+
 
     Compile errors ->
       P.vcat (concatMap Compile.toDocs (Map.elems errors))
