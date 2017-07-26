@@ -6,10 +6,8 @@ module Reporting.Error.Publish
   )
   where
 
-import qualified Data.List as List
 import qualified Text.PrettyPrint.ANSI.Leijen as P
 
-import qualified Elm.Package as Pkg
 import qualified Reporting.Error.Help as Help
 
 
