@@ -37,8 +37,8 @@ data Asset
 -- FIND
 
 
-find :: Summary.Summary -> Maybe Module.Raw -> Module.Raw -> Task.Task_ E.Problem Asset
-find (Summary.Summary root project exposed _ _) maybeParent name =
+find :: Summary.Summary -> E.Origin -> Module.Raw -> Task.Task_ E.Problem Asset
+find (Summary.Summary root project exposed _ _) origin name =
   do
       codePaths <- liftIO $ getCodePaths root project name
 
@@ -53,14 +53,14 @@ find (Summary.Summary root project exposed _ _) maybeParent name =
             return (Foreign pkg)
 
         ([], Nothing) ->
-            Task.throw $ E.ModuleNotFound maybeParent name
+            Task.throw $ E.ModuleNotFound origin name
 
         (_, maybePkgs) ->
           let
             locals = map toFilePath codePaths
             foreigns = maybe [] id maybePkgs
           in
-            Task.throw $ E.ModuleAmbiguous maybeParent name locals foreigns
+            Task.throw $ E.ModuleAmbiguous origin name locals foreigns
 
 
 

@@ -40,13 +40,13 @@ crawl :: Summary -> Args.Args FilePath -> Task.Task (Graph ())
 crawl summary args =
   case args of
     Args.Pkg names ->
-      do  let roots = map (Unvisited Nothing) names
+      do  let roots = map (Unvisited E.ElmJson) names
           let graph = freshGraph (Args.Pkg names) Map.empty
           dfs summary roots graph
 
     Args.App plan@(Plan.Plan cache pages _ _ _) ->
       do  let names = cache : map Plan._elm pages
-          let roots = map (Unvisited Nothing) names
+          let roots = map (Unvisited E.ElmJson) names
           let graph = freshGraph (Args.App plan) Map.empty
           dfs summary roots graph
 
@@ -56,7 +56,7 @@ crawl summary args =
     Args.Roots paths ->
       do  headers <- Header.readManyFiles summary paths
           let names = NonEmpty.map fst headers
-          let toUnvisited (name, header) = map (Unvisited (Just name)) (Header._imports header)
+          let toUnvisited (name, header) = map (Unvisited (E.Module name)) (Header._imports header)
           let unvisited = concatMap toUnvisited (NonEmpty.toList headers)
           let graph = freshGraph (Args.Roots names) (Map.fromList (NonEmpty.toList headers))
           dfs summary unvisited graph
@@ -69,10 +69,11 @@ crawlFromSource summary@(Summary _ project _ _ _) source =
 
 
 crawlHelp :: Summary -> ( Maybe Module.Raw, Header.Info ) -> Task.Task (Graph ())
-crawlHelp summary ( maybeName, info@(Header.Info _ _ _ deps) ) =
+crawlHelp summary ( maybeName, info@(Header.Info path _ _ deps) ) =
   do  let name = maybe "Main" id maybeName
       let args = Args.Roots (name :| [])
-      let roots = map (Unvisited maybeName) deps
+      let toUnvisited dep = Unvisited (maybe (E.File path) E.Module maybeName) dep
+      let roots = map toUnvisited deps
       let graph = freshGraph args (Map.singleton name info)
       dfs summary roots graph
 
@@ -115,7 +116,7 @@ dfsHelp summary chan oldPending oldSeen unvisited graph =
               case asset of
                 Right (Local name info@(Header.Info _ _ _ imports)) ->
                   do  let newGraph = graph { _locals = Map.insert name info (_locals graph) }
-                      let deps = map (Unvisited (Just name)) imports
+                      let deps = map (Unvisited (E.Module name)) imports
                       dfsHelp summary chan (pending - 1) seen deps newGraph
 
                 Right (Kernel name info) ->
@@ -176,7 +177,7 @@ freshGraph args locals =
 
 data Unvisited =
   Unvisited
-    { _parent :: Maybe Module.Raw
+    { _origin :: E.Origin
     , _name :: Module.Raw
     }
 
@@ -188,8 +189,8 @@ data Asset
 
 
 crawlFile :: Summary -> Unvisited -> Task.Task_ E.Problem Asset
-crawlFile summary (Unvisited maybeParent name) =
-  do  asset <- Find.find summary maybeParent name
+crawlFile summary (Unvisited origin name) =
+  do  asset <- Find.find summary origin name
       case asset of
         Find.Local path ->
           uncurry Local <$> Header.readModule summary name path

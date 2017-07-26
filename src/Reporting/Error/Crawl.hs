@@ -3,6 +3,7 @@
 module Reporting.Error.Crawl
   ( Error(..)
   , Problem(..)
+  , Origin(..)
   , toDoc
   )
   where
@@ -30,8 +31,8 @@ data Error
 
 
 data Problem
-  = ModuleNotFound (Maybe Module.Raw) Module.Raw -- TODO suggest other names
-  | ModuleAmbiguous (Maybe Module.Raw) Module.Raw [FilePath] [Pkg.Package]
+  = ModuleNotFound Origin Module.Raw -- TODO suggest other names
+  | ModuleAmbiguous Origin Module.Raw [FilePath] [Pkg.Package]
   | BadHeader FilePath Text.Text Compiler.Error
   | ModuleNameMissing FilePath Module.Raw
   | ModuleNameMismatch
@@ -40,6 +41,12 @@ data Problem
       Module.Raw -- actual
   | PortsInPackage Module.Raw
   | EffectsUnexpected Module.Raw
+
+
+data Origin
+  = ElmJson
+  | File FilePath
+  | Module Module.Raw
 
 
 
@@ -88,31 +95,11 @@ toDoc err =
 problemToDoc :: Problem -> P.Doc
 problemToDoc problem =
   case problem of
-    ModuleNotFound Nothing name ->
-      Help.makeErrorDoc
-        "Your elm.json says your project has the following module:"
-        [ P.indent 4 $ P.dullyellow $ P.text $ Module.nameToString name
-        , Help.reflow $
-            "I cannot find it though! Is there a typo in the module name? Or\
-            \ maybe some source directory is missing or misspelled in elm.json?"
-        ]
+    ModuleNotFound origin name ->
+      notFoundToDoc origin name
 
-    ModuleNotFound (Just parent) child ->
-      Help.makeErrorDoc
-        ( "The " ++ Module.nameToString parent ++ " module wants to import:"
-        )
-        [ P.indent 4 $ P.dullyellow $ P.text $ Module.nameToString child
-        , Help.reflow $
-            "I cannot find it though! Try going through these questions:"
-        , P.vcat $
-            [ "  1. Is there a typo in the module name?"
-            , "  2. Is it in a package? Did you `elm install` that package yet?"
-            , "  3. Is it a local file? Is it in a source directory listed in your elm.json?"
-            ]
-        ]
-
-    ModuleAmbiguous maybeParent child paths pkgs ->
-      ambiguousToDoc maybeParent child paths pkgs
+    ModuleAmbiguous origin child paths pkgs ->
+      ambiguousToDoc origin child paths pkgs
 
     BadHeader path source compilerError ->
       Compiler.errorToDoc Compiler.dummyLocalizer path source compilerError
@@ -178,32 +165,77 @@ namelessToDoc path name =
     ]
 
 
-ambiguousToDoc :: Maybe Module.Raw -> Module.Raw -> [FilePath] -> [Pkg.Package] -> P.Doc
-ambiguousToDoc maybeParent child paths pkgs =
+notFoundToDoc :: Origin -> Module.Raw -> P.Doc
+notFoundToDoc origin child =
+  case origin of
+    ElmJson ->
+      Help.makeErrorDoc
+        "Your elm.json says your project has the following module:"
+        [ P.indent 4 $ P.dullyellow $ P.text $ Module.nameToString child
+        , Help.reflow $
+            "I cannot find it though! Is there a typo in the module name? Or\
+            \ maybe some source directory is missing or misspelled in elm.json?"
+        ]
+
+    File path ->
+      Help.makeErrorDoc
+        ("The file at " ++ path ++ " has a bad import:")
+        (notFoundDetails child)
+
+    Module parent ->
+      Help.makeErrorDoc
+        ("The " ++ Module.nameToString parent ++ " module has a bad import:")
+        (notFoundDetails child)
+
+
+notFoundDetails :: Module.Raw -> [P.Doc]
+notFoundDetails child =
+  [ P.indent 4 $ P.dullyellow $ P.text $ "import " ++ Module.nameToString child
+  , "I cannot find that module! Is there a typo in the module name?"
+  , P.vcat
+      [ "Or maybe the module is in a package? Did you `elm install` that package yet?"
+      , Help.reflow $
+          "Or maybe it is a file you wrote and is sitting in a directory? Is it\
+          \ possible that the \"source-directories\" field in elm.json is messed up?"
+      ]
+  ]
+
+
+ambiguousToDoc :: Origin -> Module.Raw -> [FilePath] -> [Pkg.Package] -> P.Doc
+ambiguousToDoc origin child paths pkgs =
   let
-    summary =
-      case maybeParent of
-        Just parent ->
-          "The " ++ Module.nameToString parent ++ " module wants to import:"
-
-        Nothing ->
-          "Your elm.json wants the following module:"
-
     pkgToString (Pkg.Package pkg vsn) =
       "exposed by " ++ Pkg.toString pkg ++ " " ++ Pkg.versionToString vsn
+
+    makeDoc summary yellowString =
+      Help.makeErrorDoc summary
+        [ P.indent 4 $ P.dullyellow $ P.text yellowString
+        , Help.reflow $
+            "I found multiple module with that name though!"
+        , P.indent 4 $ P.dullyellow $ P.vcat $
+            map P.text $ paths ++ map pkgToString pkgs
+        , Help.reflow $
+            if null paths then
+              "It looks like the name clash is in your dependencies, which is\
+              \ out of your control. Elm does not support this scenario right\
+              \ now, but it may be worthwhile. Please open an issue describing\
+              \ your scenario so we can gather more usage information!"
+            else
+              "Which is the right one? Try renaming your modules to have unique names."
+        ]
   in
-  Help.makeErrorDoc summary $
-    [ P.indent 4 $ P.dullyellow $ P.text $ Module.nameToString child
-    , Help.reflow $
-        "I found multiple module with that name though!"
-    , P.indent 4 $ P.dullyellow $ P.vcat $
-        map P.text $ paths ++ map pkgToString pkgs
-    , Help.reflow $
-        if null paths then
-          "It looks like the name clash is in your dependencies, which is\
-          \ out of your control. Elm does not support this scenario right\
-          \ now, but it may be worthwhile. Please open an issue describing\
-          \ your scenario so we can gather more usage information!"
-        else
-          "Which is the right one? Try renaming your modules to have unique names."
-    ]
+    case origin of
+      ElmJson ->
+        makeDoc
+          "Your elm.json wants the following module:"
+          (Module.nameToString child)
+
+      File path ->
+        makeDoc
+          ("The file at " ++ path ++ " has an ambiguous import:")
+          ("import " ++ Module.nameToString child)
+
+      Module parent ->
+        makeDoc
+          ("The " ++ Module.nameToString parent ++ " module has an ambiguous import:")
+          ("import " ++ Module.nameToString child)
