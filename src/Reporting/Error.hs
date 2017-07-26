@@ -38,7 +38,7 @@ import qualified Reporting.Error.Http as Http
 data Error
   = NoElmJson
   | Assets Asset.Error
-  | BadDeps Deps.Error
+  | Deps Deps.Error
   | Crawl Crawl.Error
   | Cycle [Module.Raw] -- TODO write docs to help with this scenario
   | Compile (Map.Map Module.Raw Compile.Error) -- TODO sort compile errors by edit time
@@ -103,7 +103,7 @@ toDoc err =
     Assets assetError ->
       Asset.toDoc assetError
 
-    BadDeps depsError ->
+    Deps depsError ->
       Deps.toDoc depsError
 
     Crawl error ->

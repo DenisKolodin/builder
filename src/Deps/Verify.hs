@@ -55,7 +55,7 @@ verify root project =
 
 throw :: E.Error -> Task.Task a
 throw err =
-  Task.throw (Error.BadDeps err)
+  Task.throw (Error.Deps err)
 
 
 

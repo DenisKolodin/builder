@@ -73,7 +73,7 @@ getVersions name =
           return versions
 
         Nothing ->
-          throwError (Error.BadDeps (E.CorruptVersionCache name))
+          throwError (Error.Deps (E.CorruptVersionCache name))
 
 
 
