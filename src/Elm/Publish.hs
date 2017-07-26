@@ -22,6 +22,7 @@ import qualified Elm.Project as Project
 import qualified Elm.Project.Json as Project
 import qualified Elm.Project.Summary as Summary
 import qualified Reporting.Error as Error
+import qualified Reporting.Error.Publish as E
 import qualified Reporting.Progress as Progress
 import qualified Reporting.Task as Task
 import qualified Stuff.Paths as Path
@@ -35,7 +36,7 @@ publish :: Summary.Summary -> Task.Task ()
 publish summary@(Summary.Summary root project _ _ _) =
   case project of
     Project.App _ ->
-      Task.throw Error.CannotPublishApp
+      throw E.Application
 
     Project.Pkg (Project.PkgInfo name smry _ version exposed _ _ _ _) ->
       do
@@ -44,8 +45,8 @@ publish summary@(Summary.Summary root project _ _ _) =
 
           Task.report (Progress.PublishStart name version maybePublishedVersions)
 
-          when (null exposed)    $ Task.throw Error.PublishWithoutExposed
-          when (badSummary smry) $ Task.throw Error.PublishWithoutSummary
+          when (null exposed)    $ throw E.NoExposed
+          when (badSummary smry) $ throw E.NoSummary
 
           verifyReadme root
           verifyLicense root
@@ -57,6 +58,11 @@ publish summary@(Summary.Summary root project _ _ _) =
           Website.register name version commitHash zipHash
 
           Task.report Progress.PublishEnd
+
+
+throw :: E.Error -> Task.Task a
+throw err =
+  Task.throw (Error.Publish err)
 
 
 
@@ -79,12 +85,12 @@ verifyReadme root =
         exists <- liftIO $ Dir.doesFileExist readmePath
         case exists of
           False ->
-            Task.throw Error.PublishWithoutReadme
+            throw E.NoReadme
 
           True ->
             do  size <- liftIO $ IO.withFile readmePath IO.ReadMode IO.hFileSize
                 if size < 300
-                  then Task.throw Error.PublishWithShortReadme
+                  then throw E.ShortReadme
                   else return ()
 
 
@@ -99,7 +105,7 @@ verifyLicense root =
         exists <- liftIO $ Dir.doesFileExist licensePath
         if exists
           then return ()
-          else Task.throw Error.PublishWithoutLicense
+          else throw E.NoLicense
 
 
 
@@ -123,7 +129,7 @@ verifyNoChanges commitHash =
     do  maybeGit <- liftIO $ Dir.findExecutable "git"
         case maybeGit of
           Nothing ->
-            Task.throw (error "TODO cannot find git on your computer")
+            throw E.NoGit
 
           Just git ->
             do  -- https://stackoverflow.com/questions/3878624/how-do-i-programmatically-determine-if-there-are-uncommited-changes
@@ -135,7 +141,7 @@ verifyNoChanges commitHash =
                     return ()
 
                   Exit.ExitFailure _ ->
-                    Task.throw (error "TODO local modules do not match")
+                    throw E.LocalChanges
 
 
 

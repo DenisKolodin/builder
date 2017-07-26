@@ -1,6 +1,6 @@
 {-# OPTIONS_GHC -Wall #-}
 {-# LANGUAGE OverloadedStrings #-}
-module Reporting.Error.Commands
+module Reporting.Error.Diff
   ( Error(..)
   , toDoc
   )
@@ -18,10 +18,9 @@ import qualified Reporting.Error.Help as Help
 
 
 data Error
-  -- diff
-  = DiffApplication
-  | DiffUnknownPackage Pkg.Name [Pkg.Name]
-  | DiffUnknownVersion Pkg.Name Pkg.Version [Pkg.Version]
+  = Application
+  | UnknownPackage Pkg.Name [Pkg.Name]
+  | UnknownVersion Pkg.Name Pkg.Version [Pkg.Version]
 
 
 
@@ -31,14 +30,14 @@ data Error
 toDoc :: Error -> P.Doc
 toDoc err =
   case err of
-    DiffApplication ->
+    Application ->
       Help.makeErrorDoc "I cannot perform diffs on applications, only packages!"
         [ Help.reflow $
             "If you just curious to see a diff, try running this command:"
         , P.indent 4 $ P.green $ "elm diff elm-lang/html 5.1.1 6.0.0"
         ]
 
-    DiffUnknownPackage pkg suggestions ->
+    UnknownPackage pkg suggestions ->
       Help.makeErrorDoc
         ( "You are trying to diff against this package:"
         )
@@ -60,7 +59,7 @@ toDoc err =
                 ]
         ]
 
-    DiffUnknownVersion pkg vsn realVersions ->
+    UnknownVersion pkg vsn realVersions ->
       Help.makeErrorDoc
         ( "Version " ++ Pkg.versionToString vsn
           ++ " has never been published, so I cannot diff against it."

@@ -24,12 +24,13 @@ import qualified Elm.Project.Constraint as Con
 import qualified Elm.Utils as Utils
 import Deps.Diff (Magnitude)
 import qualified Reporting.Error.Assets as Asset
-import qualified Reporting.Error.Commands as Commands
 import qualified Reporting.Error.Compile as Compile
 import qualified Reporting.Error.Crawl as Crawl
 import qualified Reporting.Error.Deps as Deps
+import qualified Reporting.Error.Diff as Diff
 import qualified Reporting.Error.Help as Help
 import qualified Reporting.Error.Http as Http
+import qualified Reporting.Error.Publish as Publish
 
 
 
@@ -39,11 +40,12 @@ import qualified Reporting.Error.Http as Http
 data Error
   = NoElmJson
   | Assets Asset.Error
-  | Deps Deps.Error
+  | Compile (Map.Map Module.Raw Compile.Error) -- TODO sort compile errors by edit time
   | Crawl Crawl.Error
   | Cycle [Module.Raw] -- TODO write docs to help with this scenario
-  | Commands Commands.Error
-  | Compile (Map.Map Module.Raw Compile.Error) -- TODO sort compile errors by edit time
+  | Deps Deps.Error
+  | Diff Diff.Error
+  | Publish Publish.Error
   | BadHttp String Http.Error
 
   -- install
@@ -62,14 +64,6 @@ data Error
   | InvalidBump Version Version
   | BadBump Version Version Magnitude Version Magnitude
   | NotInitialVersion
-
-  -- publish
-  | CannotPublishApp
-  | PublishWithoutSummary
-  | PublishWithoutExposed
-  | PublishWithoutReadme
-  | PublishWithShortReadme
-  | PublishWithoutLicense
 
 
 
@@ -105,8 +99,8 @@ toDoc err =
     Assets assetError ->
       Asset.toDoc assetError
 
-    Deps depsError ->
-      Deps.toDoc depsError
+    Compile errors ->
+      P.vcat (concatMap Compile.toDocs (Map.elems errors))
 
     Crawl error ->
       Crawl.toDoc error
@@ -120,11 +114,14 @@ toDoc err =
             ++ Help.hintLink "module-cycles"
         ]
 
-    Commands commandsError ->
-      Commands.toDoc commandsError
+    Deps depsError ->
+      Deps.toDoc depsError
 
-    Compile errors ->
-      P.vcat (concatMap Compile.toDocs (Map.elems errors))
+    Diff commandsError ->
+      Diff.toDoc commandsError
+
+    Publish publishError ->
+      Publish.toDoc publishError
 
     BadHttp url err ->
       Http.toDoc url err
@@ -228,12 +225,6 @@ toDoc err =
         , Help.reflow $
             "Also, next time use `elm bump` and I'll figure all this out for you!"
         ]
-
-    PublishWithoutSummary ->
-      error "TODO bad summary"
-
-    PublishWithoutExposed ->
-      error "TODO no exposed modules"
 
 
 showDependency :: Name -> Constraint -> String

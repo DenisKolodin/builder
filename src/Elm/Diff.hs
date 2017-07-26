@@ -26,7 +26,7 @@ import qualified Elm.Project as Project
 import qualified Elm.Project.Json as Project
 import qualified Elm.Project.Summary as Summary
 import qualified Reporting.Error as Error
-import qualified Reporting.Error.Commands as E
+import qualified Reporting.Error.Diff as E
 import qualified Reporting.Error.Help as Help
 import qualified Reporting.Task as Task
 
@@ -49,7 +49,7 @@ diff args =
       do  pkgs <- Get.all Get.RequireLatest
           case Get.versions name pkgs of
             Left suggestions ->
-              throw $ E.DiffUnknownPackage name suggestions
+              throw $ E.UnknownPackage name suggestions
 
             Right vsns ->
               do  oldDocs <- getDocs name vsns (min v1 v2)
@@ -77,7 +77,7 @@ diff args =
 
 throw :: E.Error -> Task.Task a
 throw err =
-  Task.throw $ Error.Commands err
+  Task.throw $ Error.Diff err
 
 
 
@@ -89,7 +89,7 @@ getDocs name allVersions version =
   if elem version allVersions then
     Get.docs name version
   else
-    throw $ E.DiffUnknownVersion name version allVersions
+    throw $ E.UnknownVersion name version allVersions
 
 
 getPackageInfo :: Task.Task (Summary.Summary, Pkg.Name, [Pkg.Version])
@@ -97,7 +97,7 @@ getPackageInfo =
   do  summary <- Project.getRoot
       case Summary._project summary of
         Project.App _ ->
-          throw $ E.DiffApplication
+          throw $ E.Application
 
         Project.Pkg (Project.PkgInfo name _ _ _ _ _ _ _ _) ->
           do  pkgs <- Get.all Get.RequireLatest
