@@ -10,6 +10,8 @@ import Control.Concurrent.MVar (newEmptyMVar, putMVar, readMVar)
 import Control.Monad (foldM, void)
 import Control.Monad.Except (liftIO)
 import qualified Data.Binary as Binary
+import qualified Data.List.NonEmpty as NonEmpty
+import Data.List.NonEmpty (NonEmpty((:|)))
 import Data.Map (Map)
 import qualified Data.Map as Map
 import qualified Data.Maybe as Maybe
@@ -83,8 +85,8 @@ gather onGood answers =
         foldM (gatherHelp onGood) (Right Map.empty) (Map.toList answers)
 
       case summary of
-        Left errors ->
-          Task.throw (Error.Compile errors)
+        Left (err :| errors) ->
+          Task.throw (Error.Compile err errors)
 
         Right results ->
           return results
@@ -99,9 +101,9 @@ gatherHelp onGood summary (name, answer) =
     Blocked ->
       return summary
 
-    Bad path src localizer errors ->
-      do  let err = E.Error path src localizer errors
-          return (addErr name err summary)
+    Bad path time src localizer errors ->
+      do  let err = E.Error name path time src localizer errors
+          return (addErr err summary)
 
     Good result ->
       do  value <- onGood name result
@@ -113,7 +115,7 @@ gatherHelp onGood summary (name, answer) =
 
 
 type Summary a =
-  Either (Map Module.Raw E.Error) (Map Module.Raw a)
+  Either (NonEmpty E.Error) (Map Module.Raw a)
 
 
 addOk :: Module.Raw -> a -> Summary a -> Summary a
@@ -126,11 +128,11 @@ addOk name result acc =
       Right (Map.insert name result results)
 
 
-addErr :: Module.Raw -> E.Error -> Summary a -> Summary a
-addErr name err acc =
+addErr :: E.Error -> Summary a -> Summary a
+addErr err acc =
   case acc of
     Left errors ->
-      Left (Map.insert name err errors)
+      Left (NonEmpty.cons err errors)
 
     Right _ ->
-      Left (Map.singleton name err)
+      Left (err :| [])

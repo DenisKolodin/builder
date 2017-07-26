@@ -40,7 +40,7 @@ import qualified Reporting.Error.Publish as Publish
 data Error
   = NoElmJson
   | Assets Asset.Error
-  | Compile (Map.Map Module.Raw Compile.Error) -- TODO sort compile errors by edit time
+  | Compile Compile.Error [Compile.Error]
   | Crawl Crawl.Error
   | Cycle [Module.Raw] -- TODO write docs to help with this scenario
   | Deps Deps.Error
@@ -99,8 +99,8 @@ toDoc err =
     Assets assetError ->
       Asset.toDoc assetError
 
-    Compile errors ->
-      P.vcat (concatMap Compile.toDocs (Map.elems errors))
+    Compile err errors ->
+      Compile.toDoc err errors
 
     Crawl error ->
       Crawl.toDoc error

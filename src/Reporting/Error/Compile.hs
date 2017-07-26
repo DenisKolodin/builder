@@ -1,15 +1,20 @@
 {-# OPTIONS_GHC -Wall #-}
+{-# LANGUAGE OverloadedStrings #-}
 module Reporting.Error.Compile
   ( Error(..)
-  , toDocs
+  , toDoc
   )
   where
 
 
-import Data.Text (Text)
-import Text.PrettyPrint.ANSI.Leijen (Doc)
+import Data.List.NonEmpty (NonEmpty((:|)))
+import qualified Data.List.NonEmpty as NonEmpty
+import qualified Data.Text as Text
+import qualified Data.Time.Clock as Time
+import qualified Text.PrettyPrint.ANSI.Leijen as P
 
 import qualified Elm.Compiler as Compiler
+import qualified Elm.Compiler.Module as Module
 
 
 
@@ -18,13 +23,51 @@ import qualified Elm.Compiler as Compiler
 
 data Error =
   Error
-    { _path :: FilePath
-    , _source :: Text
+    { _name :: Module.Raw
+    , _path :: FilePath
+    , _time :: Time.UTCTime
+    , _source :: Text.Text
     , _localizer :: Compiler.Localizer
     , _errors :: [Compiler.Error]
     }
 
 
-toDocs :: Error -> [Doc]
-toDocs (Error path source localizer errors) =
-  map (Compiler.errorToDoc localizer path source) errors
+
+-- TO DOC
+
+
+toDoc :: Error -> [Error] -> P.Doc
+toDoc e es =
+  case NonEmpty.sortWith _time (e :| es) of
+    err :| errors ->
+      P.vcat (toDocHelp err errors)
+
+
+toDocHelp :: Error -> [Error] -> [P.Doc]
+toDocHelp e1 otherErrors =
+  case otherErrors of
+    [] ->
+      [errorToDoc e1]
+
+    e2 : errs ->
+      errorToDoc e1 : separator (_name e1) (_name e2) : toDocHelp e2 errs
+
+
+errorToDoc :: Error -> P.Doc
+errorToDoc (Error _name path _time source localizer errors) =
+  P.vcat $ map (Compiler.errorToDoc localizer path source) errors
+
+
+separator :: Module.Raw -> Module.Raw -> P.Doc
+separator beforeName afterName =
+  let
+    before = "    ↑  " ++ Module.nameToString beforeName
+    after  = Module.nameToString afterName  ++ "  ↓    "
+  in
+    P.dullmagenta $ P.vcat $
+      [ P.text before
+      , P.dullmagenta "----o----------------------------------------------------------------------o----"
+      , P.indent (80 - length after) (P.text after)
+      , P.empty
+      , P.empty
+      ]

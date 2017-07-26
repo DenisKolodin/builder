@@ -10,6 +10,7 @@ import Control.Monad (void)
 import Control.Monad.Except (liftIO)
 import qualified Data.Map as Map
 import Data.Text (Text)
+import qualified Data.Time.Clock as Time
 
 import qualified Elm.Compiler as Compiler
 import qualified Elm.Compiler.Module as Module
@@ -49,7 +50,7 @@ compile project ifaces modules =
 
 data Answer
   = Blocked
-  | Bad FilePath Text Compiler.Localizer [Compiler.Error]
+  | Bad FilePath Time.UTCTime Text Compiler.Localizer [Compiler.Error]
   | Good Compiler.Result
 
 
@@ -87,7 +88,9 @@ compileModule tell project answersMVar ifacesMVar name info =
                     case Compiler.compile context source of
                       (localizer, warnings, Left errors) ->
                         do  tell (Progress.CompileFileEnd name Progress.Bad)
-                            putMVar mvar (Bad (Plan._path info) source localizer errors)
+                            let path = Plan._path info
+                            let time = Plan._time info
+                            putMVar mvar (Bad path time source localizer errors)
 
                       (localizer, warnings, Right result@(Compiler.Result _ iface _)) ->
                         do  tell (Progress.CompileFileEnd name Progress.Good)
@@ -104,7 +107,7 @@ compileModule tell project answersMVar ifacesMVar name info =
 
 
 makeImports :: Project -> Plan.Info -> Dict Module.Canonical
-makeImports project (Plan.Info _ _ clean dirty foreign) =
+makeImports project (Plan.Info _ _ _ clean dirty foreign) =
   let
     pkgName =
       Project.getName project
@@ -149,7 +152,7 @@ anyBlock answers =
     Blocked : _ ->
       True
 
-    Bad _ _ _ _ : _ ->
+    Bad _ _ _ _ _ : _ ->
       True
 
     Good _ : otherAnswers ->

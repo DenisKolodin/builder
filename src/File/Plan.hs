@@ -72,6 +72,7 @@ type Status = Maybe Info
 data Info =
   Info
     { _path :: FilePath
+    , _time :: Time.UTCTime
     , _src :: Text.Text
     , _clean :: [Module.Raw]
     , _dirty :: [Module.Raw]
@@ -95,7 +96,7 @@ getStatus env statusMVars foreigns name (Header.Info path time src deps) =
 
       void $ forkIO $ putMVar mvar =<<
         do  statuses <- readMVar statusMVars
-            info <- foldM (addDep statuses foreigns) (Info path src [] [] []) deps
+            info <- foldM (addDep statuses foreigns) (Info path time src [] [] []) deps
 
             let elmi = Stuff.Paths.elmi (_root env) name
 
