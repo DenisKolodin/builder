@@ -64,9 +64,9 @@ separator beforeName afterName =
     before = "    ↑  " ++ Module.nameToString beforeName
     after  = Module.nameToString afterName  ++ "  ↓    "
   in
-    P.dullmagenta $ P.vcat $
+    P.dullred $ P.vcat $
       [ P.text before
-      , P.dullmagenta "----o----------------------------------------------------------------------o----"
+      , "====o======================================================================o===="
       , P.indent (80 - length after) (P.text after)
       , P.empty
       , P.empty
