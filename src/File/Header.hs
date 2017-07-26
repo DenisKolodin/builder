@@ -10,8 +10,10 @@ module File.Header
   where
 
 import Control.Monad.Except (liftIO)
-import Data.List.NonEmpty (NonEmpty)
-import Data.Text (Text)
+import Data.List.NonEmpty (NonEmpty((:|)))
+import qualified Data.Map as Map
+import Data.Semigroup ((<>))
+import qualified Data.Text as Text
 import qualified Data.Time.Calendar as Day
 import qualified Data.Time.Clock as Time
 import qualified System.Directory as Dir
@@ -36,29 +38,20 @@ data Info =
   Info
     { _path :: FilePath
     , _time :: Time.UTCTime
-    , _source :: Text
+    , _source :: Text.Text
     , _imports :: [Module.Raw]
     }
 
 
-
--- CRAWL TASK
-
-
-type Task a =
-  Task.Task_ E.Error a
-
-
-atRoot :: Task a -> Task.Task a
+atRoot :: Task.Task_ E.Problem a -> Task.Task_ E.Error a
 atRoot task =
-  Task.mapError Error.BadCrawlRoot task
-
+  Task.mapError (\problem -> E.DependencyProblems problem []) task
 
 
 -- READ MODULE
 
 
-readModule :: Summary -> Module.Raw -> FilePath -> Task (Module.Raw, Info)
+readModule :: Summary -> Module.Raw -> FilePath -> Task.Task_ E.Problem (Module.Raw, Info)
 readModule summary expectedName path =
   do  time <- liftIO $ Dir.getModificationTime path
       source <- liftIO $ IO.readUtf8 path
@@ -67,12 +60,25 @@ readModule summary expectedName path =
       return (name, info)
 
 
+checkName :: FilePath -> Module.Raw -> Maybe Module.Raw -> Task.Task_ E.Problem Module.Raw
+checkName path expectedName maybeName =
+  case maybeName of
+    Nothing ->
+      Task.throw (E.ModuleNameMissing path expectedName)
+
+    Just actualName ->
+      if expectedName == actualName
+        then return expectedName
+        else Task.throw (E.ModuleNameMismatch path expectedName actualName)
+
+
 
 -- READ ONE FILE
 
 
 readOneFile :: Summary -> FilePath -> Task.Task (Maybe Module.Raw, Info)
 readOneFile summary path =
+  Task.mapError Error.Crawl $
   do  time <- liftIO $ Dir.getModificationTime path
       source <- liftIO $ IO.readUtf8 path
       atRoot $ parse (_project summary) path time source
@@ -84,29 +90,46 @@ readOneFile summary path =
 
 readManyFiles :: Summary -> NonEmpty FilePath -> Task.Task (NonEmpty (Module.Raw, Info))
 readManyFiles summary files =
-  traverse (readManyFilesHelp summary) files
+  Task.mapError Error.Crawl $
+  do  infos <- traverse (readManyFilesHelp summary) files
+      let insert (name, info) dict = Map.insertWith (<>) name (info :| []) dict
+      let nameTable = foldr insert Map.empty infos
+      _ <- Map.traverseWithKey detectDuplicateNames nameTable
+      return infos
 
 
-readManyFilesHelp :: Summary -> FilePath -> Task.Task (Module.Raw, Info)
+readManyFilesHelp :: Summary -> FilePath -> Task.Task_ E.Error (Module.Raw, Info)
 readManyFilesHelp summary path =
   do  time <- liftIO $ Dir.getModificationTime path
       source <- liftIO $ IO.readUtf8 path
       (maybeName, info) <- atRoot $ parse (_project summary) path time source
       case maybeName of
         Nothing ->
-          error ("TODO module at " ++ path ++ " needs a name")
+          Task.throw (E.RootNameless path)
 
         Just name ->
           return (name, info)
+
+
+detectDuplicateNames :: Module.Raw -> NonEmpty Info -> Task.Task_ E.Error ()
+detectDuplicateNames name (info :| otherInfos) =
+  case otherInfos of
+    [] ->
+      return ()
+
+    _ ->
+      Task.throw (E.RootModuleNameDuplicate name (map _path (info : otherInfos)))
+
 
 
 
 -- READ SOURCE
 
 
-readSource :: Project -> Text -> Task.Task (Maybe Module.Raw, Info)
+readSource :: Project -> Text.Text -> Task.Task (Maybe Module.Raw, Info)
 readSource project source =
-  atRoot (parse project "elm" fakeTime source)
+  Task.mapError Error.Crawl $
+    atRoot $ parse project "elm" fakeTime source
 
 
 fakeTime :: Time.UTCTime
@@ -118,52 +141,44 @@ fakeTime =
 -- PARSE HEADER
 
 
-parse :: Project -> FilePath -> Time.UTCTime -> Text -> Task (Maybe Module.Raw, Info)
+parse :: Project -> FilePath -> Time.UTCTime -> Text.Text -> Task.Task_ E.Problem (Maybe Module.Raw, Info)
 parse project path time source =
   -- TODO get regions on data extracted here
   case Compiler.parseHeader (Project.getName project) source of
-    Right (tag, maybeName, deps) ->
-      do  checkTag project path tag
+    Right (maybeDecl, deps) ->
+      do  maybeName <- checkTag project maybeDecl
           return ( maybeName, Info path time source deps )
 
     Left msg ->
       Task.throw (E.BadHeader path source msg)
 
 
-
--- CHECKS
-
-
-checkName :: FilePath -> Module.Raw -> Maybe Module.Raw -> Task Module.Raw
-checkName path expectedName maybeName =
-  case maybeName of
+checkTag :: Project -> Maybe (Compiler.Tag, Module.Raw) -> Task.Task_ E.Problem (Maybe Module.Raw)
+checkTag project maybeDecl =
+  case maybeDecl of
     Nothing ->
-      Task.throw (E.NoName path)
+      return Nothing
 
-    Just actualName ->
-      if expectedName == actualName
-        then return expectedName
-        else Task.throw (E.BadName path actualName)
+    Just (tag, name) ->
+      do  check
+          return (Just name)
+      where
+        check =
+          case tag of
+            Compiler.Normal ->
+              return ()
 
+            Compiler.Port ->
+              case project of
+                Project.App _ ->
+                  return ()
 
-checkTag :: Project -> FilePath -> Compiler.Tag -> Task ()
-checkTag project path tag =
-  case tag of
-    Compiler.Normal ->
-      return ()
+                Project.Pkg _ ->
+                  Task.throw (E.PortsInPackage name)
 
-    Compiler.Port ->
-      case project of
-        Project.App _ ->
-          return ()
+            Compiler.Effect ->
+              if Project.getEffect project then
+                return ()
 
-        Project.Pkg _ ->
-          Task.throw (E.PortsInPackage path)
-
-    Compiler.Effect ->
-      if Project.getEffect project then
-        return ()
-
-      else
-        Task.throw (E.EffectsUnexpected path)
-
+              else
+                Task.throw (E.EffectsUnexpected name)

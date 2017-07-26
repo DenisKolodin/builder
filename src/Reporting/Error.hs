@@ -21,6 +21,7 @@ import Elm.Package (Name, Version)
 
 import Elm.Project.Constraint (Constraint)
 import qualified Elm.Project.Constraint as Con
+import qualified Elm.Utils as Utils
 import Deps.Diff (Magnitude)
 import qualified Reporting.Error.Assets as Asset
 import qualified Reporting.Error.Compile as Compile
@@ -38,8 +39,7 @@ data Error
   = NoElmJson
   | Assets Asset.Error
   | BadDeps Deps.Error
-  | BadCrawlRoot Crawl.Error
-  | BadCrawl Crawl.Issues
+  | Crawl Crawl.Error
   | Cycle [Module.Raw] -- TODO write docs to help with this scenario
   | Compile (Map.Map Module.Raw Compile.Error) -- TODO sort compile errors by edit time
   | BadHttp String Http.Error
@@ -106,11 +106,8 @@ toDoc err =
     BadDeps depsError ->
       Deps.toDoc depsError
 
-    BadCrawlRoot err ->
-      error "TODO problem at the root"
-
-    BadCrawl issues ->
-      Crawl.toDoc issues
+    Crawl error ->
+      Crawl.toDoc error
 
     Cycle names ->
       Help.makeErrorDoc

@@ -87,19 +87,23 @@ dfs summary unvisited startGraph =
 
       graph <- dfsHelp summary chan 0 Set.empty unvisited startGraph
 
-      case E.hasIssues (_problems graph) of
-        Nothing ->
+      case _problems graph of
+        [] ->
           do  checkForCycles graph
               return (graph { _problems = () })
 
-        Just issues ->
-          Task.throw (Error.BadCrawl issues)
+        problem : otherProblems ->
+          Task.throw (Error.Crawl (E.DependencyProblems problem otherProblems))
 
 
-type FileResult = Either (Module.Raw, E.Error) Asset
-
-
-dfsHelp :: Summary -> Chan FileResult -> Int -> Set.Set Module.Raw -> [Unvisited] -> WorkGraph -> Task.Task WorkGraph
+dfsHelp
+  :: Summary
+  -> Chan (Either E.Problem Asset)
+  -> Int
+  -> Set.Set Module.Raw
+  -> [Unvisited]
+  -> WorkGraph
+  -> Task.Task WorkGraph
 dfsHelp summary chan oldPending oldSeen unvisited graph =
   do  (seen, pending) <-
         foldM (crawlNew summary chan) (oldSeen, oldPending) unvisited
@@ -124,15 +128,15 @@ dfsHelp summary chan oldPending oldSeen unvisited graph =
                       let newGraph = graph { _foreigns = foreigns }
                       dfsHelp summary chan (pending - 1) seen [] newGraph
 
-                Left (name, err) ->
-                  do  let problems = Map.insert name err (_problems graph)
+                Left problem ->
+                  do  let problems = problem : _problems graph
                       let newGraph = graph { _problems = problems }
                       dfsHelp summary chan (pending - 1) seen [] newGraph
 
 
 crawlNew
   :: Summary
-  -> Chan FileResult
+  -> Chan (Either E.Problem Asset)
   -> (Set.Set Module.Raw, Int)
   -> Unvisited
   -> Task.Task (Set.Set Module.Raw, Int)
@@ -158,12 +162,12 @@ data Graph problems =
     }
 
 
-type WorkGraph = Graph (Map.Map Module.Raw E.Error)
+type WorkGraph = Graph [E.Problem]
 
 
 freshGraph :: Args.Args Module.Raw -> Map.Map Module.Raw Header.Info -> WorkGraph
 freshGraph args locals =
-  Graph args locals Map.empty Map.empty Map.empty
+  Graph args locals Map.empty Map.empty []
 
 
 
@@ -183,25 +187,24 @@ data Asset
   | Foreign Module.Raw Pkg.Package
 
 
-crawlFile :: Summary -> Unvisited -> Task.Task_ (Module.Raw, E.Error) Asset
+crawlFile :: Summary -> Unvisited -> Task.Task_ E.Problem Asset
 crawlFile summary (Unvisited maybeParent name) =
-  Task.mapError ((,) name) $
-    do  asset <- Find.find summary maybeParent name
-        case asset of
-          Find.Local path ->
-            uncurry Local <$> Header.readModule summary name path
+  do  asset <- Find.find summary maybeParent name
+      case asset of
+        Find.Local path ->
+          uncurry Local <$> Header.readModule summary name path
 
-          Find.Foreign pkg ->
-            return (Foreign name pkg)
+        Find.Foreign pkg ->
+          return (Foreign name pkg)
 
-          Find.Kernel path ->
-            do  source <- liftIO $ IO.readUtf8 path
-                case Compiler.parseKernel source of
-                  Right info ->
-                    return (Kernel name info)
+        Find.Kernel path ->
+          do  source <- liftIO $ IO.readUtf8 path
+              case Compiler.parseKernel source of
+                Right info ->
+                  return (Kernel name info)
 
-                  Left err ->
-                    Task.throw (E.BadHeader path source err)
+                Left err ->
+                  Task.throw (E.BadHeader path source err)
 
 
 
