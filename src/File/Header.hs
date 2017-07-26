@@ -79,9 +79,16 @@ checkName path expectedName maybeName =
 readOneFile :: Summary -> FilePath -> Task.Task (Maybe Module.Raw, Info)
 readOneFile summary path =
   Task.mapError Error.Crawl $
-  do  time <- liftIO $ Dir.getModificationTime path
-      source <- liftIO $ IO.readUtf8 path
+  do  (time, source) <- readOneHelp path
       atRoot $ parse (_project summary) path time source
+
+
+readOneHelp :: FilePath -> Task.Task_ E.Error (Time.UTCTime, Text.Text)
+readOneHelp path =
+  do  exists <- IO.exists path
+      if exists
+        then liftIO $ (,) <$> Dir.getModificationTime path <*> IO.readUtf8 path
+        else Task.throw $ E.RootFileNotFound path
 
 
 
@@ -100,8 +107,7 @@ readManyFiles summary files =
 
 readManyFilesHelp :: Summary -> FilePath -> Task.Task_ E.Error (Module.Raw, Info)
 readManyFilesHelp summary path =
-  do  time <- liftIO $ Dir.getModificationTime path
-      source <- liftIO $ IO.readUtf8 path
+  do  (time, source) <- readOneHelp path
       (maybeName, info) <- atRoot $ parse (_project summary) path time source
       case maybeName of
         Nothing ->

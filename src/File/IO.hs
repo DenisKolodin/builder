@@ -165,7 +165,7 @@ putHelp source sink =
 -- EXISTS
 
 
-exists :: FilePath -> Task.Task Bool
+exists :: FilePath -> Task.Task_ e Bool
 exists filePath =
   liftIO $ Dir.doesFileExist filePath
 
@@ -174,7 +174,7 @@ exists filePath =
 -- REMOVE FILES
 
 
-remove :: FilePath -> Task.Task ()
+remove :: FilePath -> Task.Task_ e ()
 remove filePath =
   liftIO $
     do  exists_ <- Dir.doesFileExist filePath
