@@ -1,7 +1,9 @@
 {-# OPTIONS_GHC -Wall #-}
 module Deps.Get
   ( all
+  , AllPackages
   , Mode(..)
+  , versions
   , info
   , docs
   )
@@ -18,10 +20,12 @@ import qualified System.Directory as Dir
 import System.FilePath ((</>))
 
 import qualified Elm.Docs as Docs
+import qualified Elm.Package as Pkg
 import Elm.Package (Name, Version)
 
 import qualified Deps.Website as Website
 import qualified Elm.Project.Json as Project
+import qualified Elm.Utils as Utils
 import qualified File.IO as IO
 import qualified Reporting.Error as Error
 import qualified Reporting.Error.Assets as E
@@ -37,7 +41,10 @@ import qualified Json.Decode as Decode
 data Mode = RequireLatest | AllowOffline
 
 
-all :: Mode -> Task.Task (Map Name [Version])
+newtype AllPackages = AllPackages (Map Name [Version])
+
+
+all :: Mode -> Task.Task AllPackages
 all mode =
   do  dir <- Task.getPackageCacheDir
       let versionsFile = dir </> "versions.dat"
@@ -47,15 +54,15 @@ all mode =
         else fetchAll versionsFile
 
 
-fetchAll :: FilePath -> Task.Task (Map Name [Version])
+fetchAll :: FilePath -> Task.Task AllPackages
 fetchAll versionsFile =
   do  packages <- Website.getAllPackages
       let size = Map.foldr ((+) . length) 0 packages
       IO.writeBinary versionsFile (size, packages)
-      return packages
+      return (AllPackages packages)
 
 
-fetchNew :: FilePath -> Mode -> Task.Task (Map Name [Version])
+fetchNew :: FilePath -> Mode -> Task.Task AllPackages
 fetchNew versionsFile mode =
   do  (size, packages) <- IO.readBinary versionsFile
 
@@ -70,16 +77,30 @@ fetchNew versionsFile mode =
                   return []
 
       if null news
-        then return packages
+        then return (AllPackages packages)
         else
-          do  let packages' = List.foldl' addNew packages news
-              IO.writeBinary versionsFile (size + length news, packages')
-              return packages'
+          do  let newAllPkgs = List.foldl' addNew packages news
+              IO.writeBinary versionsFile (size + length news, newAllPkgs)
+              return (AllPackages newAllPkgs)
 
 
 addNew :: Map Name [Version] -> (Name, Version) -> Map Name [Version]
 addNew packages (name, version) =
   Map.insertWith (++) name [version] packages
+
+
+
+-- VERSIONS
+
+
+versions :: Name -> AllPackages -> Either [Name] [Version]
+versions name (AllPackages pkgs) =
+  case Map.lookup name pkgs of
+    Just vsns ->
+      Right vsns
+
+    Nothing ->
+      Left (Utils.nearbyNames Pkg.toText name (Map.keys pkgs))
 
 
 

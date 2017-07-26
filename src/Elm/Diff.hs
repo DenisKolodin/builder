@@ -25,6 +25,8 @@ import qualified Elm.Package as Pkg
 import qualified Elm.Project as Project
 import qualified Elm.Project.Json as Project
 import qualified Elm.Project.Summary as Summary
+import qualified Reporting.Error as Error
+import qualified Reporting.Error.Commands as E
 import qualified Reporting.Error.Help as Help
 import qualified Reporting.Task as Task
 
@@ -45,11 +47,11 @@ diff args =
   case args of
     GlobalInquiry name v1 v2 ->
       do  pkgs <- Get.all Get.RequireLatest
-          case Map.lookup name pkgs of
-            Nothing ->
-              error "TODO cannot find that package"
+          case Get.versions name pkgs of
+            Left suggestions ->
+              throw $ E.DiffUnknownPackage name suggestions
 
-            Just vsns ->
+            Right vsns ->
               do  oldDocs <- getDocs name vsns (min v1 v2)
                   newDocs <- getDocs name vsns (max v1 v2)
                   writeDoc (toDoc (Diff.diff oldDocs newDocs))
@@ -73,6 +75,11 @@ diff args =
           writeDoc (toDoc (Diff.diff oldDocs newDocs))
 
 
+throw :: E.Error -> Task.Task a
+throw err =
+  Task.throw $ Error.Commands err
+
+
 
 -- DIFF HELPERS
 
@@ -82,7 +89,7 @@ getDocs name allVersions version =
   if elem version allVersions then
     Get.docs name version
   else
-    error "TODO that version does not exist"
+    throw $ E.DiffUnknownVersion name version allVersions
 
 
 getPackageInfo :: Task.Task (Summary.Summary, Pkg.Name, [Pkg.Version])
@@ -90,11 +97,12 @@ getPackageInfo =
   do  summary <- Project.getRoot
       case Summary._project summary of
         Project.App _ ->
-          Task.throw $ error "TODO cannot diff an app"
+          throw $ E.DiffApplication
 
         Project.Pkg (Project.PkgInfo name _ _ _ _ _ _ _ _) ->
           do  pkgs <- Get.all Get.RequireLatest
-              return ( summary, name, Map.findWithDefault [] name pkgs )
+              let vsns = either (const []) id (Get.versions name pkgs)
+              return ( summary, name, vsns )
 
 
 

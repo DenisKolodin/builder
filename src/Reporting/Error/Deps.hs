@@ -41,9 +41,10 @@ toDoc err =
         ( "I ran into an unknown package while exploring dependencies:"
         )
         [ P.indent 4 $ P.dullyellow $ P.text $ Pkg.toString pkg
-        , "This suggests that your ELM_HOME directory has been corrupted.\
-          \ Maybe some program is messing with it? It is just cached files,\
-          \ so you can delete it and see if that fixes the issue."
+        , Help.reflow $
+            "This suggests that your ELM_HOME directory has been corrupted.\
+            \ Maybe some program is messing with it? It is just cached files,\
+            \ so you can delete it and see if that fixes the issue."
         ]
 
     PackageNotFound package suggestions ->

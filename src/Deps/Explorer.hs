@@ -43,7 +43,7 @@ type Explorer =
 
 data Metadata =
   Metadata
-    { _vsns :: Map Name [Version]
+    { _vsns :: Get.AllPackages
     , _info :: Map (Name, Version) Info
     }
 
@@ -67,12 +67,12 @@ run explorer =
 
 getVersions :: Name -> Explorer [Version]
 getVersions name =
-  do  allVersions <- gets _vsns
-      case Map.lookup name allVersions of
-        Just versions ->
+  do  pkgs <- gets _vsns
+      case Get.versions name pkgs of
+        Right versions ->
           return versions
 
-        Nothing ->
+        Left _suggestions ->
           throwError (Error.Deps (E.CorruptVersionCache name))
 
 

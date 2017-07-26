@@ -8,15 +8,12 @@ module Reporting.Error.Help
   , toString
   , toStdout
   , toStderr
-  , nearbyNames
   )
   where
 
-import Data.Function (on)
 import qualified Data.List as List
 import GHC.IO.Handle (hIsTerminalDevice)
 import System.IO (Handle, hPutStr, stderr, stdout)
-import qualified Text.EditDistance as Dist
 import Text.PrettyPrint.ANSI.Leijen
   ( Doc, (<>), displayS, displayIO, fillSep, hardline
   , plain, red, renderPretty, text, underline
@@ -102,27 +99,3 @@ toHandle handle doc =
       if isTerminal
         then displayIO handle (renderPretty 1 80 doc)
         else hPutStr handle (toString doc)
-
-
-
--- NEARBY NAMES
-
-
-nearbyNames :: Pkg.Name -> [Pkg.Name] -> [Pkg.Name]
-nearbyNames package allPackages =
-  let
-    name =
-      Pkg.toString package
-
-    ratedNames =
-      map (\pkg -> (distance name (Pkg.toString pkg), pkg)) allPackages
-
-    sortedNames =
-      List.sortBy (compare `on` fst) ratedNames
-  in
-    map snd $ take 4 sortedNames
-
-
-distance :: String -> String -> Int
-distance x y =
-  Dist.restrictedDamerauLevenshteinDistance Dist.defaultEditCosts x y

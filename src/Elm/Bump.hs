@@ -9,7 +9,6 @@ module Elm.Bump
 
 import Control.Monad.Trans (liftIO)
 import qualified Data.List as List
-import qualified Data.Map as Map
 import Text.PrettyPrint.ANSI.Leijen ((<>), (<+>))
 import qualified Text.PrettyPrint.ANSI.Leijen as P
 
@@ -36,12 +35,12 @@ bump summary@(Summary.Summary root project _ _ _) =
       Task.throw Error.CannotBumpApp
 
     Project.Pkg info@(Project.PkgInfo name _ _ version _ _ _ _ _) ->
-      do  packages <- Get.all Get.RequireLatest
-          case Map.lookup name packages of
-            Nothing ->
+      do  pkgs <- Get.all Get.RequireLatest
+          case Get.versions name pkgs of
+            Left _suggestions ->
               checkNewPackage root info
 
-            Just publishedVersions ->
+            Right publishedVersions ->
               let
                 bumpableVersions =
                   map (\(old, _, _) -> old) (toPossibleBumps publishedVersions)

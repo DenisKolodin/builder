@@ -6,7 +6,6 @@ import Control.Monad (when)
 import Control.Monad.Except (catchError, runExceptT)
 import Control.Monad.Trans (liftIO, lift)
 import qualified Data.List as List
-import qualified Data.Map as Map
 import qualified Data.Text as Text
 import qualified System.Directory as Dir
 import qualified System.Exit as Exit
@@ -40,8 +39,8 @@ publish summary@(Summary.Summary root project _ _ _) =
 
     Project.Pkg (Project.PkgInfo name smry _ version exposed _ _ _ _) ->
       do
-          allPackages <- Get.all Get.RequireLatest
-          let maybePublishedVersions = Map.lookup name allPackages
+          pkgs <- Get.all Get.RequireLatest
+          let maybePublishedVersions = either (const Nothing) Just (Get.versions name pkgs)
 
           Task.report (Progress.PublishStart name version maybePublishedVersions)
 

@@ -24,6 +24,7 @@ import qualified Elm.Project.Constraint as Con
 import qualified Elm.Utils as Utils
 import Deps.Diff (Magnitude)
 import qualified Reporting.Error.Assets as Asset
+import qualified Reporting.Error.Commands as Commands
 import qualified Reporting.Error.Compile as Compile
 import qualified Reporting.Error.Crawl as Crawl
 import qualified Reporting.Error.Deps as Deps
@@ -41,6 +42,7 @@ data Error
   | Deps Deps.Error
   | Crawl Crawl.Error
   | Cycle [Module.Raw] -- TODO write docs to help with this scenario
+  | Commands Commands.Error
   | Compile (Map.Map Module.Raw Compile.Error) -- TODO sort compile errors by edit time
   | BadHttp String Http.Error
 
@@ -118,6 +120,8 @@ toDoc err =
             ++ Help.hintLink "module-cycles"
         ]
 
+    Commands commandsError ->
+      Commands.toDoc commandsError
 
     Compile errors ->
       P.vcat (concatMap Compile.toDocs (Map.elems errors))
