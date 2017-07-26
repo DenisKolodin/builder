@@ -4,6 +4,7 @@ module Reporting.Error.Help
   ( hintLink
   , stack
   , reflow
+  , note
   , makeErrorDoc
   , toString
   , toStdout
@@ -58,6 +59,12 @@ reflow paragraph =
   fillSep (map text (words paragraph))
 
 
+note :: String -> Doc
+note details =
+  fillSep $
+    (underline "Note" <> ":") : map text (words details)
+
+
 makeErrorDoc :: String -> [Doc] -> Doc
 makeErrorDoc summary details =
   let
@@ -71,7 +78,7 @@ makeErrorDoc summary details =
 
 errorStart :: Doc
 errorStart =
-  red (underline (text "Error")) <> text ":"
+  red (underline "Error") <> ":"
 
 
 

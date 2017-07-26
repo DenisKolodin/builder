@@ -151,8 +151,8 @@ badTagToDoc name tag hintName summary =
         , P.dullyellow (P.text (Module.nameToString name))
         , "to", "proceed."
         ]
-    , Help.reflow $
-        "This kind of decision is quite complex, and you can learn more about it here: "
+    , Help.note $
+        "You can learn the reasoning behind this design choice at "
         ++ Help.hintLink hintName
     ]
 
@@ -169,11 +169,12 @@ namelessToDoc path name =
     [ P.indent 4 $ P.dullyellow $ P.text $
         "module " ++ Module.nameToString name ++ " exposing (..)"
     , Help.reflow $
-        "Ideally you can replace the (..) with an explicit list of types\
-        \ and functions you want to expose to other modules. If you know\
-        \ a value is only used WITHIN this module, it is extra easy to\
-        \ refactor. This kind of information is great, especially as your\
-        \ project grows!"
+        "Try adding that as the first line of your file!"
+    , Help.note $
+        "It is best to replace (..) with an explicit list of types and\
+        \ functions you want to expose. If you know a value is only used\
+        \ WITHIN this module, it is extra easy to refactor. This kind of\
+        \ information is great, especially as your project grows!"
     ]
 
 
