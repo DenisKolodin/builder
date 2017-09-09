@@ -60,8 +60,8 @@ genExport debug canonicalName@(Module.Canonical _ name) =
 
     args =
       "(Elm" <> mconcat (map brackets nameChunks)
-      <> ", '" <> BS.stringUtf8 (Module.nameToString name)
-      <> "', " <> genDebugInfo debug canonicalName <> ");"
+      <> ")('" <> BS.stringUtf8 (Module.nameToString name)
+      <> "')(" <> genDebugInfo debug canonicalName <> ");"
   in
     "if (typeof " <> programFunction <> " !== 'undefined') {"
     <> genObject nameChunks
