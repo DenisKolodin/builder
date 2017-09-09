@@ -46,12 +46,16 @@ Library
         Elm.Diff,
         Elm.Install,
         Elm.PerUserCache,
-        Elm.Project,
         Elm.Publish,
         File.IO,
         Reporting.Progress.Repl,
         Reporting.Progress.Terminal,
-        Reporting.Task
+        Reporting.Task,
+
+        Elm.Project,
+        Elm.Project.Constraint,
+        Elm.Project.Json,
+        Elm.Project.Licenses
 
     other-modules:
         Deps.Diff,
@@ -60,9 +64,6 @@ Library
         Deps.Solver,
         Deps.Verify,
         Deps.Website,
-        Elm.Project.Constraint,
-        Elm.Project.Json,
-        Elm.Project.Licenses,
         Elm.Project.Root,
         Elm.Project.Summary,
         File.Args,
@@ -76,10 +77,10 @@ Library
         Generate.App,
         Generate.Functions,
         Generate.Output,
-        Generate.Plan,
         Generate.Repl,
         Reporting.Error,
         Reporting.Error.Assets,
+        Reporting.Error.Bump,
         Reporting.Error.Compile,
         Reporting.Error.Crawl,
         Reporting.Error.Deps,
