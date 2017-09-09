@@ -9,8 +9,6 @@ module Reporting.Error
   where
 
 
-import qualified Data.List as List
-import qualified Data.Map as Map
 import qualified Text.PrettyPrint.ANSI.Leijen as P
 import Text.PrettyPrint.ANSI.Leijen ((<+>))
 
@@ -22,8 +20,8 @@ import Elm.Package (Name, Version)
 import Elm.Project.Constraint (Constraint)
 import qualified Elm.Project.Constraint as Con
 import qualified Elm.Utils as Utils
-import Deps.Diff (Magnitude)
 import qualified Reporting.Error.Assets as Asset
+import qualified Reporting.Error.Bump as Bump
 import qualified Reporting.Error.Compile as Compile
 import qualified Reporting.Error.Crawl as Crawl
 import qualified Reporting.Error.Deps as Deps
@@ -40,6 +38,7 @@ import qualified Reporting.Error.Publish as Publish
 data Error
   = NoElmJson
   | Assets Asset.Error
+  | Bump Bump.Error
   | Compile Compile.Error [Compile.Error]
   | Crawl Crawl.Error
   | Cycle [Module.Raw] -- TODO write docs to help with this scenario
@@ -50,20 +49,6 @@ data Error
 
   -- install
   | NoSolution [Name]
-
-  -- diffs
-  | Undiffable
-  | VersionInvalid
-  | VersionJustChanged
-  | MissingTag Version
-
-  -- bumps
-  | CannotBumpApp
-  | AlreadyPublished Version
-  | Unbumpable Version [Version]
-  | InvalidBump Version Version
-  | BadBump Version Version Magnitude Version Magnitude
-  | NotInitialVersion
 
 
 
@@ -82,149 +67,57 @@ data Hint
 
 toString :: Error -> String
 toString err =
-  Help.toString (toDoc err)
+  Help.toString (Help.reportToDoc (toReport err))
 
 
 toStderr :: Error -> IO ()
 toStderr err =
-  Help.toStderr (toDoc err)
+  Help.toStderr (Help.reportToDoc (toReport err))
 
 
-toDoc :: Error -> P.Doc
-toDoc err =
+toReport :: Error -> Help.Report
+toReport err =
   case err of
     NoElmJson ->
       error "TODO no elm.json file yet. That means it is a new project?"
 
     Assets assetError ->
-      Asset.toDoc assetError
+      Asset.toReport assetError
+
+    Bump bumpError ->
+      Bump.toReport bumpError
 
     Compile err errors ->
-      Compile.toDoc err errors
+      Help.compilerReport $ Compile.toDoc err errors
 
     Crawl error ->
-      Crawl.toDoc error
+      Crawl.toReport error
 
     Cycle names ->
-      Help.makeErrorDoc
+      Help.report "IMPORT CYCLE" Nothing
         "Your module imports form a cycle:"
         [ P.indent 4 (Utils.drawCycle names)
         , Help.reflow $
             "Learn more about why this is disallowed and how to break cycles here:"
-            ++ Help.hintLink "module-cycles"
+            ++ Help.hintLink "import-cycles"
         ]
 
     Deps depsError ->
-      Deps.toDoc depsError
+      Deps.toReport depsError
 
     Diff commandsError ->
-      Diff.toDoc commandsError
+      Diff.toReport commandsError
 
     Publish publishError ->
-      Publish.toDoc publishError
+      Publish.toReport publishError
 
     BadHttp url err ->
-      Http.toDoc url err
+      Http.toReport url err
 
     NoSolution badPackages ->
       error $
         "TODO the following packages are incompatible with this version of Elm: "
         ++ unwords (map Pkg.toString badPackages)
-
-    Undiffable ->
-      Help.makeErrorDoc "This package has not been published, there is nothing to diff against!" []
-
-    VersionInvalid ->
-      Help.makeErrorDoc
-        "Cannot publish a package with an invalid version. Use `elm bump` to\
-        \ figure out what the next version should be, and be sure you commit any\
-        \ changes and tag them appropriately."
-        []
-
-    VersionJustChanged ->
-      Help.makeErrorDoc
-        "Cannot publish a package with an invalid version. Be sure you commit any\
-        \ necessary changes and tag them appropriately."
-        []
-
-    MissingTag version ->
-      let
-        vsn =
-          Pkg.versionToString version
-      in
-        Help.makeErrorDoc
-          ( "Libraries must be tagged in git, but tag " ++ vsn ++ " was not found."
-          )
-          [ P.vcat $ map P.text $
-              [ "These tags make it possible to find this specific version on GitHub."
-              , "To tag the most recent commit and push it to GitHub, run this:"
-              , ""
-              , "    git tag -a " ++ vsn ++ " -m \"release version " ++ vsn ++ "\""
-              , "    git push origin " ++ vsn
-              ]
-          ]
-
-    AlreadyPublished vsn ->
-      Help.makeErrorDoc
-        ( "Version " ++ Pkg.versionToString vsn ++ " has already been published.\
-          \ You cannot publish it again! Run the following command to see what\
-          \ the new version should be:"
-        )
-        [ P.indent 4 $ P.text "elm bump"
-        ]
-
-    Unbumpable vsn versions ->
-      let
-        list =
-          case map Pkg.versionToString versions of
-            [v] ->
-              " to " ++ v ++ "."
-
-            [v,w] ->
-              " to " ++ v ++ " or " ++ w ++ "."
-
-            vsnStrings ->
-              " to one of these:  "++ List.intercalate ", " vsnStrings
-      in
-        Help.makeErrorDoc
-          ( "To compute a version bump, I need to start with a version that has\
-            \ already been published. Your elm.json says I should start with version "
-            ++ Pkg.versionToString vsn
-            ++ ", but I cannot find that version on <http://package.elm-lang.org>."
-          )
-          [ Help.reflow $
-              "Try again after changing the version in elm.json" ++ list
-          ]
-
-    InvalidBump statedVersion latestVersion ->
-      Help.makeErrorDoc
-        ( "Your elm.json says the next version should be "
-          ++ Pkg.versionToString statedVersion ++ ", but that is not valid\
-          \ based on the previously published versions."
-        )
-        [ Help.reflow $
-            "Generally, you want to put the most recently published version ("
-            ++ Pkg.versionToString latestVersion
-            ++ " for this package) in your elm.json and run `elm bump` to figure out what should come next."
-        ]
-
-    BadBump old new magnitude realNew realMagnitude ->
-      Help.makeErrorDoc
-        ( "Your elm.json says the next version should be "
-          ++ Pkg.versionToString new ++ ", indicating a " ++ error "TODO magnitude" magnitude
-          ++ " change to the public API. This does not match the API diff given by:"
-        )
-        [ P.indent 4 $ P.text $
-            "elm diff " ++ Pkg.versionToString old
-
-        , Help.reflow $
-          "This command says this is a " ++ error "TODO realMagnitude" realMagnitude
-          ++ " change, so the next version should be "
-          ++ Pkg.versionToString realNew
-          ++ ". Double check everything to make sure you are publishing what you want!"
-        , Help.reflow $
-            "Also, next time use `elm bump` and I'll figure all this out for you!"
-        ]
 
 
 showDependency :: Name -> Constraint -> String

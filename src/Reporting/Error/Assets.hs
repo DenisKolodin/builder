@@ -4,7 +4,7 @@ module Reporting.Error.Assets
   ( Error(..)
   , ElmJsonProblem(..)
   , BuildPlanProblem(..)
-  , toDoc
+  , toReport
   )
   where
 
@@ -40,26 +40,26 @@ data BuildPlanProblem
 
 
 
--- TO DOC
+-- TO REPORT
 
 
-toDoc :: Error -> P.Doc
-toDoc err =
+toReport :: Error -> Help.Report
+toReport err =
   case err of
     BadElmJson problem ->
-      elmJsonToDoc problem
+      elmJsonToReport problem
 
     BadBuildPlan problem ->
-      buildPlanToDoc problem
+      buildPlanToReport problem
 
     CorruptElmJson pkg vsn ->
-      corruptJsonToDoc "elm.json" pkg vsn
+      corruptJsonToReport "elm.json" pkg vsn
 
     CorruptDocumentation pkg vsn ->
-      corruptJsonToDoc "docs.json" pkg vsn
+      corruptJsonToReport "docs.json" pkg vsn
 
     CorruptBinary path ->
-      Help.makeErrorDoc
+      Help.report "CORRUPT BINARY" (Just path)
         ("The binary data at " ++ path ++ " is corrupt.")
         [ Help.reflow $
             "Maybe a program is modifying your elm-stuff/ or ELM_HOME\
@@ -72,9 +72,9 @@ toDoc err =
 -- CORRUPT JSON
 
 
-corruptJsonToDoc :: FilePath -> Pkg.Name -> Pkg.Version -> P.Doc
-corruptJsonToDoc path pkg vsn =
-  Help.makeErrorDoc
+corruptJsonToReport :: FilePath -> Pkg.Name -> Pkg.Version -> Help.Report
+corruptJsonToReport path pkg vsn =
+  Help.report "CORRUPT JSON" Nothing
     ( "The " ++ path ++ " for " ++ Pkg.toString pkg
       ++ " " ++ Pkg.versionToString vsn ++ " got corrupted somehow."
     )
@@ -89,32 +89,29 @@ corruptJsonToDoc path pkg vsn =
 -- BAD ELM JSON
 
 
-elmJsonToDoc :: ElmJsonProblem -> P.Doc
-elmJsonToDoc problem =
+elmJsonToReport :: ElmJsonProblem -> Help.Report
+elmJsonToReport problem =
   case problem of
     BadJson maybeDecodeError ->
-      makeElmJsonDoc $
+      makeElmJsonReport $
         Json.toDoc (Json.Path "elm.json") "project" maybeDecodeError
 
     BadDepDup field1 field2 dup dups ->
-      makeElmJsonDoc $
+      makeElmJsonReport $
         badDepDupToDoc field1 field2 dup dups
 
     BadSrcDir dir ->
-      Help.makeErrorDoc
+      Help.report "ELM.JSON PROBLEM" (Just "elm.json")
         "The \"source-directories\" in your elm.json lists the following directory:"
         [ P.indent 4 (P.dullyellow (P.text dir))
         , Help.reflow "I cannot find that directory though! Is it missing? Is there a typo?"
         ]
 
 
-makeElmJsonDoc :: ( String, [P.Doc] ) -> P.Doc
-makeElmJsonDoc ( overview, details ) =
-  let
-    link =
-      "More help at <https://github.com/elm-lang/elm-package/blob/master/TODO>"
-  in
-    Help.makeErrorDoc overview (details ++ [ Help.reflow link ])
+makeElmJsonReport :: ( String, [P.Doc] ) -> Help.Report
+makeElmJsonReport ( overview, details ) =
+  let link = "More help at <https://github.com/elm-lang/elm-package/blob/master/TODO>" in
+  Help.report "ELM.JSON PROBLEM" (Just "elm.json") overview (details ++ [ Help.reflow link ])
 
 
 badDepDupToDoc :: String -> String -> Pkg.Name -> [Pkg.Name] -> ( String, [P.Doc] )
@@ -136,8 +133,8 @@ badDepDupToDoc field1 field2 dup dups =
         "Delete duplicates until each package lives in ONE category."
   in
     ( introduction
-    , [ P.indent 4 $ P.vcat $
-          map (P.dullyellow . P.text . Pkg.toString) (dup:dups)
+    , [ P.dullyellow $ P.indent 4 $ P.vcat $
+          map (P.text . Pkg.toString) (dup:dups)
       , Help.reflow $
           "The " ++ packagesAre ++ " available in \"" ++ field1
           ++ "\", so it is redundant to list it again in \"" ++ field2
@@ -150,18 +147,15 @@ badDepDupToDoc field1 field2 dup dups =
 -- BAD BUILD PLAN
 
 
-buildPlanToDoc :: BuildPlanProblem -> P.Doc
-buildPlanToDoc problem =
+buildPlanToReport :: BuildPlanProblem -> Help.Report
+buildPlanToReport problem =
   case problem of
     BadPlanJson maybeDecodeError ->
       makeBuildPlanDoc $
         Json.toDoc (Json.Path "elm-build-plan.json") "plan" maybeDecodeError
 
 
-makeBuildPlanDoc :: ( String, [P.Doc] ) -> P.Doc
+makeBuildPlanDoc :: ( String, [P.Doc] ) -> Help.Report
 makeBuildPlanDoc ( overview, details ) =
-  let
-    link =
-      "More help at <https://github.com/elm-lang/elm-package/blob/master/TODO>"
-  in
-    Help.makeErrorDoc overview (details ++ [ Help.reflow link ])
+  let link = "More help at <https://github.com/elm-lang/elm-package/blob/master/TODO>" in
+  Help.report "BUILD PLAN PROBLEM" Nothing overview (details ++ [ Help.reflow link ])

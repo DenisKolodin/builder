@@ -2,7 +2,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Reporting.Error.Http
   ( Error(..)
-  , toDoc
+  , toReport
   )
   where
 
@@ -26,18 +26,18 @@ data Error
 
 
 
--- TO DOC
+-- TO REPORT
 
 
-toDoc :: String -> Error -> P.Doc
-toDoc url err =
+toReport :: String -> Error -> Help.Report
+toReport url err =
   let
     urlDoc =
       P.indent 4 $ P.dullyellow $ "<" <> P.text url <> ">"
   in
   case err of
     Unknown message ->
-      Help.makeErrorDoc "The following HTTP request failed:"
+      Help.report "HTTP PROBLEM" Nothing "The following HTTP request failed:"
         [ urlDoc
         , Help.stack
             [ "Here is the error message I was able to extract:"
@@ -50,10 +50,10 @@ toDoc url err =
         (intro, details) =
           Json.toDoc Json.Url "json" maybeDecodeError
       in
-        Help.makeErrorDoc intro (urlDoc : details)
+        Help.report "UNEXPECTED JSON" Nothing intro (urlDoc : details)
 
     BadZipData ->
-      Help.makeErrorDoc "I could not unzip the file downloaded from:"
+      Help.report "CORRUPT ZIP" Nothing "I could not unzip the file downloaded from:"
         [ urlDoc
         , Help.reflow $
             "If it is a transient issue, it should be fixed if you try this\
@@ -61,7 +61,7 @@ toDoc url err =
         ]
 
     BadZipSha expectedHash actualHash ->
-      Help.makeErrorDoc "I got an unexpected .zip file from:"
+      Help.report "CORRUPT ZIP" Nothing "I got an unexpected zip file from:"
         [ urlDoc
         , Help.reflow $
             "I was expecting the hash of content to be " ++ expectedHash

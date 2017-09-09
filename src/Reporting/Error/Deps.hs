@@ -2,7 +2,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Reporting.Error.Deps
   ( Error(..)
-  , toDoc
+  , toReport
   )
   where
 
@@ -33,11 +33,11 @@ data Error
 -- TO DOC
 
 
-toDoc :: Error -> P.Doc
-toDoc err =
+toReport :: Error -> Help.Report
+toReport err =
   case err of
     CorruptVersionCache pkg ->
-      Help.makeErrorDoc
+      Help.report "CORRUPT CACHE" Nothing
         ( "I ran into an unknown package while exploring dependencies:"
         )
         [ P.indent 4 $ P.dullyellow $ P.text $ Pkg.toString pkg
@@ -48,16 +48,15 @@ toDoc err =
         ]
 
     PackageNotFound package suggestions ->
-      Help.makeErrorDoc
+      Help.report "PACKAGE NOT FOUND" Nothing
         ( "Could not find any packages named " ++ Pkg.toString package
         )
         [ P.text $ "Maybe you want one of these instead?"
         , P.indent 4 $ P.vcat $ map (P.text . Pkg.toString) suggestions
         ]
 
-
     AppBadElm version ->
-      Help.makeErrorDoc
+      Help.report "ELM VERSION MISMATCH" Nothing
         "Your elm.json says this application needs a different version of Elm."
         [ P.fillSep
             [ "It", "requires"
@@ -69,7 +68,7 @@ toDoc err =
         ]
 
     PkgBadElm constraint ->
-      Help.makeErrorDoc
+      Help.report "ELM VERSION MISMATCH" Nothing
         "Your elm.json says this package needs a version of Elm in this range:"
         [ P.indent 4 $ P.dullyellow $ P.text $ Con.toString constraint
         , P.fillSep
@@ -80,7 +79,7 @@ toDoc err =
         ]
 
     BadDeps ->
-      Help.makeErrorDoc
+      Help.report "CLASHING PACKAGE DEPENDENCIES" Nothing
         "The dependencies in your elm.json are not compatible."
         [ Help.reflow $
             "Did you change them by hand? Try to change it back! It is much\
@@ -92,7 +91,7 @@ toDoc err =
         ]
 
     BuildFailure pkg vsn ->
-      Help.makeErrorDoc
+      Help.report "CORRUPT DEPENDENCY" Nothing
         "I ran into a problem while building the following package:"
         [ P.indent 4 $ P.dullyellow $ P.text $ Pkg.toString pkg ++ " " ++ Pkg.versionToString vsn
         , Help.reflow $

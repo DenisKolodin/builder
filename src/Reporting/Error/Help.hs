@@ -1,11 +1,15 @@
 {-# OPTIONS_GHC -Wall #-}
 {-# LANGUAGE OverloadedStrings #-}
 module Reporting.Error.Help
-  ( hintLink
+  ( Report
+  , report
+  , docReport
+  , compilerReport
+  , reportToDoc
+  , hintLink
   , stack
   , reflow
   , note
-  , makeErrorDoc
   , toString
   , toStdout
   , toStderr
@@ -15,13 +19,66 @@ module Reporting.Error.Help
 import qualified Data.List as List
 import GHC.IO.Handle (hIsTerminalDevice)
 import System.IO (Handle, hPutStr, stderr, stdout)
-import Text.PrettyPrint.ANSI.Leijen
-  ( Doc, (<>), displayS, displayIO, fillSep, hardline
-  , plain, red, renderPretty, text, underline
-  )
+import qualified Text.PrettyPrint.ANSI.Leijen as P
+import Text.PrettyPrint.ANSI.Leijen ((<>),(<+>))
 
 import qualified Elm.Compiler as Compiler
 import qualified Elm.Package as Pkg
+
+
+
+-- REPORT
+
+
+data Report
+  = FromCompiler P.Doc
+  | Report
+      { _title :: String
+      , _path :: Maybe FilePath
+      , _start :: P.Doc
+      , _others :: [P.Doc]
+      }
+
+
+report :: String -> Maybe FilePath -> String -> [P.Doc] -> Report
+report title maybePath startString others =
+  Report title maybePath (P.text startString) others
+
+
+docReport :: String -> Maybe FilePath -> P.Doc -> [P.Doc] -> Report
+docReport =
+  Report
+
+
+compilerReport :: P.Doc -> Report
+compilerReport =
+  FromCompiler
+
+
+reportToDoc :: Report -> P.Doc
+reportToDoc report =
+  case report of
+    FromCompiler doc ->
+      doc
+
+    Report title maybePath start others ->
+      let
+        makeDashes n =
+          replicate (max 1 (80 - n)) '-'
+
+        errorBarEnd =
+          case maybePath of
+            Nothing ->
+              makeDashes (4 + length title)
+
+            Just path ->
+              makeDashes (5 + length title + length path) ++ " " ++ path
+
+        errorBar =
+          P.dullcyan $
+            "--" <+> P.text title <+> P.text errorBarEnd
+      in
+        stack (errorBar : start : others ++ [""])
 
 
 
@@ -39,7 +96,7 @@ hintLink hintName =
 -- HELPERS
 
 
-stack :: [Doc] -> Doc
+stack :: [P.Doc] -> P.Doc
 stack allDocs =
   case allDocs of
     [] ->
@@ -49,60 +106,44 @@ stack allDocs =
       List.foldl' verticalAppend doc docs
 
 
-verticalAppend :: Doc -> Doc -> Doc
+verticalAppend :: P.Doc -> P.Doc -> P.Doc
 verticalAppend a b =
-  a <> hardline <> hardline <> b
+  a <> P.hardline <> P.hardline <> b
 
 
-reflow :: String -> Doc
+reflow :: String -> P.Doc
 reflow paragraph =
-  fillSep (map text (words paragraph))
+  P.fillSep (map P.text (words paragraph))
 
 
-note :: String -> Doc
+note :: String -> P.Doc
 note details =
-  fillSep $
-    (underline "Note" <> ":") : map text (words details)
-
-
-makeErrorDoc :: String -> [Doc] -> Doc
-makeErrorDoc summary details =
-  let
-    summaryDoc =
-      fillSep (errorStart : map text (words summary))
-  in
-    stack (summaryDoc : details)
-    <> hardline
-    <> hardline
-
-
-errorStart :: Doc
-errorStart =
-  red (underline "Error") <> ":"
+  P.fillSep $
+    (P.underline "Note" <> ":") : map P.text (words details)
 
 
 
 -- OUTPUT
 
 
-toString :: Doc -> String
+toString :: P.Doc -> String
 toString doc =
-  displayS (renderPretty 1 80 (plain doc)) ""
+  P.displayS (P.renderPretty 1 80 (P.plain doc)) ""
 
 
-toStdout :: Doc -> IO ()
+toStdout :: P.Doc -> IO ()
 toStdout doc =
   toHandle stdout doc
 
 
-toStderr :: Doc -> IO ()
+toStderr :: P.Doc -> IO ()
 toStderr doc =
   toHandle stderr doc
 
 
-toHandle :: Handle -> Doc -> IO ()
+toHandle :: Handle -> P.Doc -> IO ()
 toHandle handle doc =
   do  isTerminal <- hIsTerminalDevice handle
       if isTerminal
-        then displayIO handle (renderPretty 1 80 doc)
+        then P.displayIO handle (P.renderPretty 1 80 doc)
         else hPutStr handle (toString doc)

@@ -2,7 +2,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Reporting.Error.Diff
   ( Error(..)
-  , toDoc
+  , toReport
   )
   where
 
@@ -21,24 +21,28 @@ data Error
   = Application
   | UnknownPackage Pkg.Name [Pkg.Name]
   | UnknownVersion Pkg.Name Pkg.Version [Pkg.Version]
+  -- diffs
+  | Undiffable
+  | VersionInvalid
+  | VersionJustChanged
 
 
 
 -- TO DOC
 
 
-toDoc :: Error -> P.Doc
-toDoc err =
+toReport :: Error -> Help.Report
+toReport err =
   case err of
     Application ->
-      Help.makeErrorDoc "I cannot perform diffs on applications, only packages!"
-        [ Help.reflow $
-            "If you just curious to see a diff, try running this command:"
-        , P.indent 4 $ P.green $ "elm diff elm-lang/html 5.1.1 6.0.0"
+      Help.report "CANNOT DIFF APPLICATIONS" Nothing
+        "I cannot perform diffs on applications, only packages! If you are\
+        \ just curious to see a diff, try running this command:"
+        [ P.indent 4 $ P.green $ "elm diff elm-lang/html 5.1.1 6.0.0"
         ]
 
     UnknownPackage pkg suggestions ->
-      Help.makeErrorDoc
+      Help.report "UNKNOWN PACKAGE" Nothing
         ( "You are trying to diff against this package:"
         )
         [ P.indent 4 $ P.red $ P.text $ Pkg.toString pkg
@@ -60,9 +64,12 @@ toDoc err =
         ]
 
     UnknownVersion pkg vsn realVersions ->
-      Help.makeErrorDoc
-        ( "Version " ++ Pkg.versionToString vsn
-          ++ " has never been published, so I cannot diff against it."
+      Help.docReport "UNKNOWN VERSION" Nothing
+        ( P.fillSep $
+            [ "Version", P.red (P.text (Pkg.versionToString vsn))
+            , "has", "never", "been", "published,", "so", "I"
+            , "cannot", "diff", "against", "it."
+            ]
         )
         [ "Here are all the versions that HAVE been published:"
         , P.indent 4 $ P.dullyellow $ P.vcat $
@@ -73,3 +80,21 @@ toDoc err =
               map mkRow $ List.groupBy sameMajor (List.sort realVersions)
         , "Want one of those instead?"
         ]
+
+    Undiffable ->
+      Help.report "TODO" Nothing
+        "This package has not been published, so there are no old releases to diff against yet!"
+        []
+
+    VersionInvalid ->
+      Help.report "TODO" (Just "elm.json")
+        "Cannot publish a package with an invalid version. Use `elm bump` to\
+        \ figure out what the next version should be, and be sure you commit any\
+        \ changes and tag them appropriately."
+        []
+
+    VersionJustChanged ->
+      Help.report "TODO" Nothing
+        "Cannot publish a package with an invalid version. Be sure you commit any\
+        \ necessary changes and tag them appropriately."
+        []

@@ -152,39 +152,39 @@ parse project path time source =
   -- TODO get regions on data extracted here
   case Compiler.parseHeader (Project.getName project) source of
     Right (maybeDecl, deps) ->
-      do  maybeName <- checkTag project maybeDecl
+      do  maybeName <- checkTag project path maybeDecl
           return ( maybeName, Info path time source deps )
 
     Left msg ->
       Task.throw (E.BadHeader path source msg)
 
 
-checkTag :: Project -> Maybe (Compiler.Tag, Module.Raw) -> Task.Task_ E.Problem (Maybe Module.Raw)
-checkTag project maybeDecl =
+checkTag :: Project -> FilePath -> Maybe (Compiler.Tag, Module.Raw) -> Task.Task_ E.Problem (Maybe Module.Raw)
+checkTag project path maybeDecl =
   case maybeDecl of
     Nothing ->
       return Nothing
 
     Just (tag, name) ->
-      do  check
+      let
+        success =
           return (Just name)
-      where
-        check =
-          case tag of
-            Compiler.Normal ->
-              return ()
+      in
+      case tag of
+        Compiler.Normal ->
+          success
 
-            Compiler.Port ->
-              case project of
-                Project.App _ ->
-                  return ()
+        Compiler.Port ->
+          case project of
+            Project.App _ ->
+              success
 
-                Project.Pkg _ ->
-                  Task.throw (E.PortsInPackage name)
+            Project.Pkg _ ->
+              Task.throw (E.PortsInPackage path name)
 
-            Compiler.Effect ->
-              if Project.getEffect project then
-                return ()
+        Compiler.Effect ->
+          if Project.isPlatformPackage project then
+            success
 
-              else
-                Task.throw (E.EffectsUnexpected name)
+          else
+            Task.throw (E.EffectsUnexpected path name)

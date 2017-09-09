@@ -4,11 +4,12 @@ module Reporting.Error.Crawl
   ( Error(..)
   , Problem(..)
   , Origin(..)
-  , toDoc
+  , toReport
   )
   where
 
 
+import qualified Data.Char as Char
 import qualified Data.Text as Text
 import qualified Text.PrettyPrint.ANSI.Leijen as P
 import Text.PrettyPrint.ANSI.Leijen ((<+>), (<>))
@@ -39,32 +40,32 @@ data Problem
       FilePath
       Module.Raw -- expected
       Module.Raw -- actual
-  | PortsInPackage Module.Raw
-  | EffectsUnexpected Module.Raw
+  | PortsInPackage FilePath Module.Raw
+  | EffectsUnexpected FilePath Module.Raw
 
 
 data Origin
   = ElmJson
   | File FilePath
-  | Module Module.Raw
+  | Module FilePath Module.Raw
 
 
 
--- TO DOC
+-- TO REPORT
 
 
-toDoc :: Error -> P.Doc
-toDoc err =
+toReport :: Error -> Help.Report
+toReport err =
   case err of
     RootFileNotFound path ->
-      Help.makeErrorDoc
+      Help.report "FILE NOT FOUND" Nothing
         "You want me to compile this file:"
         [ P.indent 4 $ P.dullyellow $ P.text path
         , "I cannot find it though! Is there a typo?"
         ]
 
     RootModuleNameDuplicate name paths ->
-      Help.makeErrorDoc
+      Help.report "DUPLICATE NAMES" Nothing
         "I am trying to compile multiple modules with the same name:"
         [ P.indent 4 $ P.dullyellow $ P.vcat $
             map P.text paths
@@ -82,18 +83,18 @@ toDoc err =
     DependencyProblems problem otherProblems ->
       case otherProblems of
         [] ->
-          problemToDoc problem
+          problemToReport problem
 
         _ ->
           error "TODO handle multiple dependency errors"
 
 
 
--- PROBLEM TO DOC
+-- PROBLEM TO REPORT
 
 
-problemToDoc :: Problem -> P.Doc
-problemToDoc problem =
+problemToReport :: Problem -> Help.Report
+problemToReport problem =
   case problem of
     ModuleNotFound origin name ->
       notFoundToDoc origin name
@@ -102,35 +103,39 @@ problemToDoc problem =
       ambiguousToDoc origin child paths pkgs
 
     BadHeader path source compilerError ->
-      Compiler.errorToDoc Compiler.dummyLocalizer path source compilerError
+      Help.compilerReport $
+        Compiler.errorToDoc Compiler.dummyLocalizer path source compilerError
 
     ModuleNameMissing path name ->
       namelessToDoc path name
 
     ModuleNameMismatch path expected actual ->
-      Help.makeErrorDoc
+      Help.report "MODULE NAME MISMATCH" (Just path)
         ( "The file at " ++ path ++ " has a typo in the module name. It says:"
         )
-        [ P.indent 4 $ "module" <+> P.red (P.text (Module.nameToString actual)) <+> "exposing (..)"
+        [ P.indent 4 $ P.dullyellow $ "module" <+> P.red (P.text (Module.nameToString actual)) <+> "exposing (..)"
         , "Looks like a typo or copy/paste error. Instead it needs to say:"
-        , P.indent 4 $ "module" <+> P.green (P.text (Module.nameToString expected)) <+> "exposing (..)"
+        , P.indent 4 $ P.dullyellow $ "module" <+> P.green (P.text (Module.nameToString expected)) <+> "exposing (..)"
         , "Make the change and you should be all set!"
         ]
 
-    PortsInPackage name ->
-      badTagToDoc name "port" "port-modules" $
+    PortsInPackage path name ->
+      badTagToDoc path name "port" "port-modules" $
         "Packages cannot have any `port` modules."
 
-    EffectsUnexpected name ->
-      badTagToDoc name "effect" "effect-modules" $
+    EffectsUnexpected path name ->
+      badTagToDoc path name "effect" "effect-modules" $
         "Creating `effect` modules is relatively experimental. There are a\
         \ couple in @elm-lang repos right now, but we have decided to be\
         \ very cautious in expanding its usage."
 
 
-badTagToDoc :: Module.Raw -> String -> String -> String -> P.Doc
-badTagToDoc name tag hintName summary =
-  Help.makeErrorDoc summary
+badTagToDoc :: FilePath -> Module.Raw -> String -> String -> String -> Help.Report
+badTagToDoc path name tag hintName summary =
+  Help.report
+    ("UNEXPECTED " ++ map Char.toUpper tag ++ " MODULE")
+    (Just path)
+    summary
     [ P.fillSep $
         [ "Get", "rid", "of", "all", "the"
         , P.red (P.text tag)
@@ -148,10 +153,11 @@ badTagToDoc name tag hintName summary =
 -- HELPERS
 
 
-namelessToDoc :: FilePath -> Module.Raw -> P.Doc
+namelessToDoc :: FilePath -> Module.Raw -> Help.Report
 namelessToDoc path name =
-  Help.makeErrorDoc
-    ( "The file at " ++ path ++ " must start with a line like this:"
+  Help.report "UNNAMED MODULE" (Just path)
+    ( "The `" ++ Module.nameToString name
+      ++ "` module must start with a line like this:"
     )
     [ P.indent 4 $ P.dullyellow $ P.text $
         "module " ++ Module.nameToString name ++ " exposing (..)"
@@ -165,11 +171,11 @@ namelessToDoc path name =
     ]
 
 
-notFoundToDoc :: Origin -> Module.Raw -> P.Doc
+notFoundToDoc :: Origin -> Module.Raw -> Help.Report
 notFoundToDoc origin child =
   case origin of
     ElmJson ->
-      Help.makeErrorDoc
+      Help.report "MODULE NOT FOUND" Nothing
         "Your elm.json says your project has the following module:"
         [ P.indent 4 $ P.dullyellow $ P.text $ Module.nameToString child
         , Help.reflow $
@@ -178,12 +184,12 @@ notFoundToDoc origin child =
         ]
 
     File path ->
-      Help.makeErrorDoc
-        ("The file at " ++ path ++ " has a bad import:")
+      Help.report "UNKNOWN IMPORT" (Just path)
+        ("The " ++ path ++ " file has a bad import:")
         (notFoundDetails child)
 
-    Module parent ->
-      Help.makeErrorDoc
+    Module path parent ->
+      Help.report "UNKNOWN IMPORT" (Just path)
         ("The " ++ Module.nameToString parent ++ " module has a bad import:")
         (notFoundDetails child)
 
@@ -201,17 +207,17 @@ notFoundDetails child =
   ]
 
 
-ambiguousToDoc :: Origin -> Module.Raw -> [FilePath] -> [Pkg.Package] -> P.Doc
+ambiguousToDoc :: Origin -> Module.Raw -> [FilePath] -> [Pkg.Package] -> Help.Report
 ambiguousToDoc origin child paths pkgs =
   let
     pkgToString (Pkg.Package pkg vsn) =
       "exposed by " ++ Pkg.toString pkg ++ " " ++ Pkg.versionToString vsn
 
-    makeDoc summary yellowString =
-      Help.makeErrorDoc summary
+    makeReport maybePath summary yellowString =
+      Help.report "AMBIGUOUS IMPORT" maybePath summary
         [ P.indent 4 $ P.dullyellow $ P.text yellowString
         , Help.reflow $
-            "I found multiple module with that name though!"
+            "I found multiple module with that name though:"
         , P.indent 4 $ P.dullyellow $ P.vcat $
             map P.text $ paths ++ map pkgToString pkgs
         , Help.reflow $
@@ -226,16 +232,19 @@ ambiguousToDoc origin child paths pkgs =
   in
     case origin of
       ElmJson ->
-        makeDoc
+        makeReport
+          Nothing
           "Your elm.json wants the following module:"
           (Module.nameToString child)
 
       File path ->
-        makeDoc
+        makeReport
+          (Just path)
           ("The file at " ++ path ++ " has an ambiguous import:")
           ("import " ++ Module.nameToString child)
 
-      Module parent ->
-        makeDoc
+      Module path parent ->
+        makeReport
+          (Just path)
           ("The " ++ Module.nameToString parent ++ " module has an ambiguous import:")
           ("import " ++ Module.nameToString child)

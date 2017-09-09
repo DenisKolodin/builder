@@ -61,13 +61,13 @@ errorToDoc (Error _name path _time source localizer errors) =
 separator :: Module.Raw -> Module.Raw -> P.Doc
 separator beforeName afterName =
   let
-    before = "    ↑  " ++ Module.nameToString beforeName
-    after  = Module.nameToString afterName  ++ "  ↓    "
+    before = Module.nameToString beforeName ++ "  ↑    "
+    after  = "    ↓  " ++  Module.nameToString afterName
   in
     P.dullred $ P.vcat $
-      [ P.text before
+      [ P.indent (80 - length before) (P.text before)
       , "====o======================================================================o===="
-      , P.indent (80 - length after) (P.text after)
+      , P.text after
       , P.empty
       , P.empty
       ]
