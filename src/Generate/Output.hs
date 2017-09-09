@@ -23,7 +23,6 @@ import qualified File.Args as Args
 import qualified File.Crawl as Crawl
 import qualified File.IO as IO
 import qualified Generate.App as App
-import qualified Generate.Plan as Plan
 import qualified Generate.Repl as Repl
 import qualified Reporting.Task as Task
 import qualified Stuff.Paths as Paths
@@ -41,9 +40,6 @@ generate summary graph@(Crawl.Graph args _ _ _ _) =
 
     Args.Roots names ->
       generateMonolith summary graph (NonEmpty.toList names)
-
-    Args.App plan ->
-      generatePlan summary graph plan
 
 
 
@@ -104,13 +100,4 @@ loadPackageObj :: ( Pkg.Name, (Pkg.Version, deps) ) -> Task.Task Obj.Graph
 loadPackageObj ( name, (version,_) ) =
   do  dir <- Task.getPackageCacheDirFor name version
       IO.readBinary (dir </> "objs.dat")
-
-
-
--- GENERATE PLAN
-
-
-generatePlan :: Summary.Summary -> Crawl.Graph () -> Plan.Plan -> Task.Task ()
-generatePlan summary graph plan =
-  error "TODO generate based on the plan"
 

@@ -26,7 +26,6 @@ import qualified File.Args as Args
 import qualified File.Find as Find
 import qualified File.Header as Header
 import qualified File.IO as IO
-import qualified Generate.Plan as Plan
 import qualified Reporting.Error as Error
 import qualified Reporting.Error.Crawl as E
 import qualified Reporting.Task as Task
@@ -44,22 +43,18 @@ crawl summary args =
           let graph = freshGraph (Args.Pkg names) Map.empty
           dfs summary roots graph
 
-    Args.App plan@(Plan.Plan cache pages _ _ _) ->
-      do  let names = cache : map Plan._elm pages
-          let roots = map (Unvisited E.ElmJson) names
-          let graph = freshGraph (Args.App plan) Map.empty
-          dfs summary roots graph
-
     Args.Roots (path :| []) ->
       crawlHelp summary =<< Header.readOneFile summary path
 
     Args.Roots paths ->
       do  headers <- Header.readManyFiles summary paths
           let names = NonEmpty.map fst headers
-          let toUnvisited (name, header) = map (Unvisited (E.Module name)) (Header._imports header)
           let unvisited = concatMap toUnvisited (NonEmpty.toList headers)
           let graph = freshGraph (Args.Roots names) (Map.fromList (NonEmpty.toList headers))
           dfs summary unvisited graph
+      where
+        toUnvisited (name, Header.Info path _ _ deps) =
+          map (Unvisited (E.Module path name)) deps
 
 
 crawlFromSource :: Summary -> Text -> Task.Task (Graph ())
@@ -72,7 +67,7 @@ crawlHelp :: Summary -> ( Maybe Module.Raw, Header.Info ) -> Task.Task (Graph ()
 crawlHelp summary ( maybeName, info@(Header.Info path _ _ deps) ) =
   do  let name = maybe "Main" id maybeName
       let args = Args.Roots (name :| [])
-      let toUnvisited dep = Unvisited (maybe (E.File path) E.Module maybeName) dep
+      let toUnvisited dep = Unvisited (maybe (E.File path) (E.Module path) maybeName) dep
       let roots = map toUnvisited deps
       let graph = freshGraph args (Map.singleton name info)
       dfs summary roots graph
@@ -114,9 +109,9 @@ dfsHelp summary chan oldPending oldSeen unvisited graph =
         else
           do  asset <- liftIO $ readChan chan
               case asset of
-                Right (Local name info@(Header.Info _ _ _ imports)) ->
+                Right (Local name info@(Header.Info path _ _ imports)) ->
                   do  let newGraph = graph { _locals = Map.insert name info (_locals graph) }
-                      let deps = map (Unvisited (E.Module name)) imports
+                      let deps = map (Unvisited (E.Module path name)) imports
                       dfsHelp summary chan (pending - 1) seen deps newGraph
 
                 Right (Kernel name info) ->

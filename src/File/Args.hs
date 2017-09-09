@@ -11,13 +11,11 @@ import Data.List.NonEmpty (NonEmpty((:|)))
 import qualified Elm.Compiler.Module as Module
 import qualified Elm.Project.Json as Project
 import qualified Elm.Project.Summary as Summary
-import qualified Generate.Plan as Plan
 import qualified Reporting.Task as Task
 
 
 data Args roots
   = Pkg [Module.Raw]
-  | App Plan.Plan
   | Roots (NonEmpty roots)
 
 
