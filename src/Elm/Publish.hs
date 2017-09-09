@@ -17,6 +17,7 @@ import qualified Deps.Diff as Diff
 import qualified Deps.Get as Get
 import qualified Deps.Website as Website
 import qualified Elm.Bump as Bump
+import qualified Elm.Docs as Docs
 import qualified Elm.Package as Pkg
 import qualified Elm.Project as Project
 import qualified Elm.Project.Json as Project
@@ -38,7 +39,7 @@ publish summary@(Summary.Summary root project _ _ _) =
     Project.App _ ->
       throw E.Application
 
-    Project.Pkg (Project.PkgInfo name smry _ version exposed _ _ _ _) ->
+    Project.Pkg (Project.PkgInfo name smry _ version exposed _ _ _) ->
       do
           pkgs <- Get.all Get.RequireLatest
           let maybePublishedVersions = either (const Nothing) Just (Get.versions name pkgs)
@@ -50,9 +51,10 @@ publish summary@(Summary.Summary root project _ _ _) =
 
           verifyReadme root
           verifyLicense root
-          verifyVersion summary name version maybePublishedVersions
+          docs <- Task.silently (Project.generateDocs summary)
+          verifyVersion name version docs maybePublishedVersions
           commitHash <- verifyTag name version
-          verifyNoChanges commitHash
+          verifyNoChanges commitHash version
           zipHash <- verifyZip name version
 
           Website.register name version commitHash zipHash
@@ -116,15 +118,15 @@ verifyTag :: Pkg.Name -> Pkg.Version -> Task.Task String
 verifyTag name version =
   phase (Progress.CheckTag version) $
     Website.githubCommit name version `catchError` \_ ->
-      Task.throw (Error.MissingTag version)
+      throw (E.MissingTag version)
 
 
 
 -- VERIFY NO LOCAL CHANGES SINCE TAG
 
 
-verifyNoChanges :: String -> Task.Task ()
-verifyNoChanges commitHash =
+verifyNoChanges :: String -> Pkg.Version -> Task.Task ()
+verifyNoChanges commitHash version =
   phase Progress.CheckChanges $
     do  maybeGit <- liftIO $ Dir.findExecutable "git"
         case maybeGit of
@@ -141,7 +143,7 @@ verifyNoChanges commitHash =
                     return ()
 
                   Exit.ExitFailure _ ->
-                    throw E.LocalChanges
+                    throw (E.LocalChanges version)
 
 
 
@@ -192,8 +194,8 @@ phase publishPhase task =
 -- VERIFY VERSION
 
 
-verifyVersion :: Summary.Summary -> Pkg.Name -> Pkg.Version -> Maybe [Pkg.Version] -> Task.Task ()
-verifyVersion summary name version maybePublishedVersions =
+verifyVersion :: Pkg.Name -> Pkg.Version -> Docs.Documentation -> Maybe [Pkg.Version] -> Task.Task ()
+verifyVersion name version docs maybePublishedVersions =
   let
     reportBumpPhase bumpPhase =
       Task.report $ Progress.PublishCheckBump version bumpPhase
@@ -204,13 +206,13 @@ verifyVersion summary name version maybePublishedVersions =
           if version == Pkg.initialVersion then
             reportBumpPhase Progress.GoodStart
           else
-            Task.throw Error.NotInitialVersion
+            throw E.NotInitialVersion
 
         Just publishedVersions ->
           if elem version publishedVersions then
-            Task.throw $ Error.AlreadyPublished version
+            throw $ E.AlreadyPublished version
           else
-            do  (old, magnitude) <- verifyBump summary name version publishedVersions
+            do  (old, magnitude) <- verifyBump name version docs publishedVersions
                 reportBumpPhase (Progress.GoodBump old magnitude)
 
   `catchError` \err ->
@@ -218,8 +220,8 @@ verifyVersion summary name version maybePublishedVersions =
         Task.throw err
 
 
-verifyBump :: Summary.Summary -> Pkg.Name -> Pkg.Version -> [Pkg.Version] -> Task.Task (Pkg.Version, Diff.Magnitude)
-verifyBump summary name statedVersion publishedVersions =
+verifyBump :: Pkg.Name -> Pkg.Version -> Docs.Documentation -> [Pkg.Version] -> Task.Task (Pkg.Version, Diff.Magnitude)
+verifyBump name statedVersion newDocs publishedVersions =
   let
     possibleBumps =
       Bump.toPossibleBumps publishedVersions
@@ -229,16 +231,15 @@ verifyBump summary name statedVersion publishedVersions =
   in
   case List.find isTheBump possibleBumps of
     Nothing ->
-      Task.throw $ Error.InvalidBump statedVersion (last publishedVersions)
+      throw $ E.InvalidBump statedVersion (last publishedVersions)
 
     Just (old, new, magnitude) ->
       do  oldDocs <- Get.docs name old
-          newDocs <- Task.silently (Project.generateDocs summary)
           let changes = Diff.diff oldDocs newDocs
           let realNew = Diff.bump changes old
           if new == realNew
             then
               return (old, magnitude)
             else
-              Task.throw $ Error.BadBump old new magnitude realNew $
+              throw $ E.BadBump old new magnitude realNew $
                 Diff.toMagnitude changes

@@ -92,5 +92,4 @@ replInfo =
     , _pkg_deps = Map.singleton Pkg.core Con.anything
     , _pkg_test_deps = Map.empty
     , _pkg_elm_version = Con.defaultElm
-    , _pkg_effects = False
     }

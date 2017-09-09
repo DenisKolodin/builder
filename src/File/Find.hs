@@ -91,7 +91,7 @@ getCodePaths root project name =
   do  let srcDirs = map (root </>) (Project.getSourceDirs project)
       elm <- mapM (elmExists name) srcDirs
       Maybe.catMaybes <$>
-        if Text.isPrefixOf "Elm.Kernel." name && Project.isKernel project then
+        if Text.isPrefixOf "Elm.Kernel." name && Project.isPlatformPackage project then
           (++ elm) <$> mapM (jsExists name) srcDirs
 
         else

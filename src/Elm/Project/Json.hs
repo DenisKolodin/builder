@@ -12,12 +12,11 @@ module Elm.Project.Json
   , pkgDecoder
   -- queries
   , appSolution
-  , isKernel
+  , isPlatformPackage
   , isPackageRoot
   , get
   , getName
   , getSourceDirs
-  , getEffect
   )
   where
 
@@ -29,6 +28,7 @@ import qualified Data.HashMap.Lazy as HashMap
 import qualified Data.Map as Map
 import qualified Data.Text as Text
 import Data.Map (Map)
+import Data.Monoid ((<>))
 import qualified System.Directory as Dir
 import System.FilePath ((</>))
 
@@ -82,7 +82,6 @@ data PkgInfo =
     , _pkg_deps :: Map Name Con.Constraint
     , _pkg_test_deps :: Map Name Con.Constraint
     , _pkg_elm_version :: Con.Constraint
-    , _pkg_effects :: Bool
     }
 
 
@@ -108,8 +107,8 @@ appSolution info =
     ]
 
 
-isKernel :: Project -> Bool
-isKernel project =
+isPlatformPackage :: Project -> Bool
+isPlatformPackage project =
   case project of
     App _ ->
       False
@@ -152,11 +151,6 @@ getSourceDirs project =
   get _app_source_dirs (\_ -> ["src"]) project
 
 
-getEffect :: Project -> Bool
-getEffect project =
-  get (const False) _pkg_effects project
-
-
 
 -- WRITE
 
@@ -175,7 +169,7 @@ encode project =
   case project of
     App (AppInfo elm srcDirs deps tests trans) ->
       E.object
-        [ "type" ==> E.string "application"
+        [ "type" ==> E.string "browser"
         , "source-directories" ==> E.list E.string srcDirs
         , "elm-version" ==> encodeVersion elm
         , "dependencies" ==> encodeDeps encodeVersion deps
@@ -184,8 +178,8 @@ encode project =
             E.object [ "transitive-dependencies" ==> encodeDeps encodeVersion trans ]
         ]
 
-    Pkg (PkgInfo name summary license version exposed deps tests elm effects) ->
-      E.object $
+    Pkg (PkgInfo name summary license version exposed deps tests elm) ->
+      E.object
         [ "type" ==> E.string "package"
         , "name" ==> E.string (Pkg.toString name)
         , "summary" ==> E.text summary
@@ -196,7 +190,6 @@ encode project =
         , "dependencies" ==> encodeDeps encodeConstraint deps
         , "test-dependencies" ==> encodeDeps encodeConstraint tests
         ]
-        ++ if effects then [ "effect-modules" ==> E.bool True ] else []
 
 
 (==>) :: a -> b -> (a, b)
@@ -230,7 +223,7 @@ read path =
         Left err ->
           throwBadJson (E.BadJson err)
 
-        Right project@(Pkg (PkgInfo _ _ _ _ _ deps tests _ _)) ->
+        Right project@(Pkg (PkgInfo _ _ _ _ _ deps tests _)) ->
           do  checkOverlap "dependencies" "test-dependencies" deps tests
               return project
 
@@ -273,14 +266,14 @@ decoder :: D.Decoder Project
 decoder =
   do  tipe <- D.field "type" D.text
       case tipe of
-        "application" ->
+        "browser" ->
           D.map App appDecoder
 
         "package" ->
           D.map Pkg pkgDecoder
 
         _ ->
-          D.fail "\"application\" or \"package\""
+          D.fail "\"browser\" or \"package\""
 
 
 appDecoder :: D.Decoder AppInfo
@@ -304,13 +297,6 @@ pkgDecoder =
     <*> D.field "dependencies" (depsDecoder constraintDecoder)
     <*> D.field "test-dependencies" (depsDecoder constraintDecoder)
     <*> D.field "elm-version" constraintDecoder
-    <*> flag "effect-modules"
-
-
-flag :: Text -> D.Decoder Bool
-flag name =
-  maybe False id <$>
-    D.maybe (D.field name D.bool)
 
 
 
@@ -370,7 +356,16 @@ licenseDecoder =
   do  txt <- D.text
       case Licenses.check txt of
         Left suggestions ->
-          error "TODO license" suggestions
+          D.fail $ Text.unpack $
+            if null suggestions then
+              genericError
+            else
+              genericError <> " like " <> Text.intercalate ", " suggestions
 
         Right license ->
           D.succeed license
+
+
+genericError :: Text
+genericError =
+  "Expecting an OSI approved license from <https://spdx.org/licenses/>"

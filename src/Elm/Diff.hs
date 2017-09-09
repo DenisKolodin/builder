@@ -99,7 +99,7 @@ getPackageInfo =
         Project.App _ ->
           throw $ E.Application
 
-        Project.Pkg (Project.PkgInfo name _ _ _ _ _ _ _ _) ->
+        Project.Pkg (Project.PkgInfo name _ _ _ _ _ _ _) ->
           do  pkgs <- Get.all Get.RequireLatest
               let vsns = either (const []) id (Get.versions name pkgs)
               return ( summary, name, vsns )

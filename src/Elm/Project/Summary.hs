@@ -75,7 +75,7 @@ privatize exposed (Module.Canonical _ name) iface =
 
 
 toNode :: PkgInfo -> DepsGraph -> DepsGraph
-toNode (PkgInfo name _ _ version _ deps _ _ _) graph =
+toNode (PkgInfo name _ _ version _ deps _ _) graph =
   Map.insert name (version, Map.keys deps) graph
 
 

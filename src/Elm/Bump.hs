@@ -19,6 +19,7 @@ import qualified Elm.Project as Project
 import qualified Elm.Project.Json as Project
 import qualified Elm.Project.Summary as Summary
 import qualified Reporting.Error as Error
+import qualified Reporting.Error.Bump as E
 import qualified Reporting.Error.Help as Help
 import qualified Reporting.Progress.Terminal as Terminal
 import qualified Reporting.Task as Task
@@ -32,9 +33,9 @@ bump :: Summary.Summary -> Task.Task ()
 bump summary@(Summary.Summary root project _ _ _) =
   case project of
     Project.App _ ->
-      Task.throw Error.CannotBumpApp
+      Task.throw (Error.Bump E.Application)
 
-    Project.Pkg info@(Project.PkgInfo name _ _ version _ _ _ _ _) ->
+    Project.Pkg info@(Project.PkgInfo name _ _ version _ _ _ _) ->
       do  pkgs <- Get.all Get.RequireLatest
           case Get.versions name pkgs of
             Left _suggestions ->
@@ -48,7 +49,7 @@ bump summary@(Summary.Summary root project _ _ _) =
                 if elem version bumpableVersions then
                   suggestVersion summary info
                 else
-                  Task.throw $ Error.Unbumpable version $
+                  Task.throw $ Error.Bump $ E.Unbumpable version $
                     map head (List.group (List.sort bumpableVersions))
 
 
@@ -83,7 +84,7 @@ toPossibleBumps publishedVersions =
 
 
 checkNewPackage :: FilePath -> Project.PkgInfo -> Task.Task ()
-checkNewPackage root info@(Project.PkgInfo _ _ _ version _ _ _ _ _) =
+checkNewPackage root info@(Project.PkgInfo _ _ _ version _ _ _ _) =
   do  liftIO $ putStrLn Terminal.newPackageOverview
       if version == Pkg.initialVersion
         then
@@ -100,7 +101,7 @@ checkNewPackage root info@(Project.PkgInfo _ _ _ version _ _ _ _ _) =
 
 
 suggestVersion :: Summary.Summary -> Project.PkgInfo -> Task.Task ()
-suggestVersion summary@(Summary.Summary root _ _ _ _) info@(Project.PkgInfo name _ _ version _ _ _ _ _) =
+suggestVersion summary@(Summary.Summary root _ _ _ _) info@(Project.PkgInfo name _ _ version _ _ _ _) =
   do  oldDocs <- Get.docs name version
       newDocs <- Task.silently (Project.generateDocs summary)
       let changes = Diff.diff oldDocs newDocs

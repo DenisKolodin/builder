@@ -68,7 +68,7 @@ makePlan pkg project attemptInstall =
 
           withApproval Pkg.versionToString changes (attemptInstall newProject)
 
-    Project.Pkg info@(Project.PkgInfo _ _ _ _ _ deps test _ _) ->
+    Project.Pkg info@(Project.PkgInfo _ _ _ _ _ deps test _) ->
       do  changes <- addToPkg pkg info
 
           let news = Map.mapMaybe keepNew changes
@@ -176,7 +176,7 @@ addToAppHelp pkg (Project.AppInfo _ _ deps tests trans) =
 
 
 addToPkg :: Name -> Project.PkgInfo -> Task.Task (Map Name (Change Constraint))
-addToPkg pkg info@(Project.PkgInfo _ _ _ _ _ deps tests _ _) =
+addToPkg pkg info@(Project.PkgInfo _ _ _ _ _ deps tests _) =
   Explorer.run $
     do  let old = Map.union deps tests
         result <- Solver.run (addToPkgHelp pkg info)
@@ -191,7 +191,7 @@ addToPkg pkg info@(Project.PkgInfo _ _ _ _ _ deps tests _ _) =
 
 
 addToPkgHelp :: Name -> Project.PkgInfo -> Solver.Solver (Map Name Constraint)
-addToPkgHelp pkg (Project.PkgInfo _ _ _ _ _ deps tests _ _) =
+addToPkgHelp pkg (Project.PkgInfo _ _ _ _ _ deps tests _) =
   do  let directs = Map.union deps tests
       let newCons = Map.insert pkg Con.anything directs
       solution <- Solver.solve newCons
