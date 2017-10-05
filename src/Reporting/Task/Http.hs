@@ -19,11 +19,8 @@ import Control.Concurrent.Chan (Chan, newChan, readChan, writeChan)
 import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar, readMVar)
 import Control.Exception (Exception, SomeException, catch)
 import Control.Monad (forever, join, replicateM_, void)
-import qualified Data.ByteString.Char8 as BSC
-import qualified Data.List as List
 import qualified Network.HTTP as Http (urlEncodeVars)
 import qualified Network.HTTP.Client as Http
-import qualified Network.HTTP.Types as Http
 
 import qualified Elm.Compiler as Compiler
 import qualified Elm.Package as Pkg
@@ -168,7 +165,6 @@ versionParam =
 fetchSafe :: String -> Http.Manager -> Handler a -> IO (Either Error.Error a)
 fetchSafe url manager handler =
   fetchUnsafe url manager handler
-    `catch` handleHttpError url
     `catch` \e -> handleAnyError url (e :: SomeException)
 
 
@@ -182,22 +178,6 @@ fetchUnsafe url manager handler =
 
         Left problem ->
           return (Left (Error.BadHttp url problem))
-
-
-handleHttpError :: String -> Http.HttpException -> IO (Either Error.Error a)
-handleHttpError url exception =
-  case exception of
-    Http.StatusCodeException (Http.Status _code err) headers _ ->
-      return $ Left $ Error.BadHttp url $ E.Unknown $ BSC.unpack $
-        case List.lookup "X-Response-Body-Start" headers of
-          Just msg | not (BSC.null msg) ->
-            msg
-
-          _ ->
-            err
-
-    _ ->
-      handleAnyError url exception
 
 
 handleAnyError :: (Exception e) => String -> e -> IO (Either Error.Error a)

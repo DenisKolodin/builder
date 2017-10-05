@@ -331,6 +331,6 @@ register name version commitHash digest =
   in
     Http.run $ Http.package "register" params $ \rawRequest manager ->
       do  requestWithBody <- Multi.formDataBody files rawRequest
-          let request = requestWithBody { Client.responseTimeout = Nothing }
+          let request = requestWithBody { Client.responseTimeout = Client.responseTimeoutNone }
           void $ Client.httpLbs request manager
           return $ Right ()
