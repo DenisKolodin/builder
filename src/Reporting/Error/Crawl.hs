@@ -35,6 +35,7 @@ data Problem
   = ModuleNotFound Origin Module.Raw -- TODO suggest other names
   | ModuleAmbiguous Origin Module.Raw [FilePath] [Pkg.Package]
   | BadHeader FilePath Text.Text Compiler.Error
+  | ModuleNameReservedForKernel Module.Raw
   | ModuleNameMissing FilePath Module.Raw
   | ModuleNameMismatch
       FilePath

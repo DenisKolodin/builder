@@ -16,7 +16,6 @@ module Elm.Project.Json
   , isPackageRoot
   , get
   , getName
-  , getSourceDirs
   )
   where
 
@@ -144,11 +143,6 @@ get appFunc pkgFunc project =
 getName :: Project -> Name
 getName project =
   get (\_ -> Pkg.dummyName) _pkg_name project
-
-
-getSourceDirs :: Project -> [FilePath]
-getSourceDirs project =
-  get _app_source_dirs (\_ -> ["src"]) project
 
 
 

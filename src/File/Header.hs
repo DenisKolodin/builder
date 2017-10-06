@@ -18,8 +18,8 @@ import qualified Data.Time.Calendar as Day
 import qualified Data.Time.Clock as Time
 import qualified System.Directory as Dir
 
-import qualified Elm.Compiler as Compiler
 import qualified Elm.Compiler.Module as Module
+import qualified Elm.Header as Header
 
 import qualified Elm.Project.Json as Project
 import Elm.Project.Json (Project)
@@ -150,7 +150,7 @@ fakeTime =
 parse :: Project -> FilePath -> Time.UTCTime -> Text.Text -> Task.Task_ E.Problem (Maybe Module.Raw, Info)
 parse project path time source =
   -- TODO get regions on data extracted here
-  case Compiler.parseHeader (Project.getName project) source of
+  case Header.parse (Project.getName project) source of
     Right (maybeDecl, deps) ->
       do  maybeName <- checkTag project path maybeDecl
           return ( maybeName, Info path time source deps )
@@ -159,7 +159,7 @@ parse project path time source =
       Task.throw (E.BadHeader path source msg)
 
 
-checkTag :: Project -> FilePath -> Maybe (Compiler.Tag, Module.Raw) -> Task.Task_ E.Problem (Maybe Module.Raw)
+checkTag :: Project -> FilePath -> Maybe (Header.Tag, Module.Raw) -> Task.Task_ E.Problem (Maybe Module.Raw)
 checkTag project path maybeDecl =
   case maybeDecl of
     Nothing ->
@@ -171,10 +171,10 @@ checkTag project path maybeDecl =
           return (Just name)
       in
       case tag of
-        Compiler.Normal ->
+        Header.Normal ->
           success
 
-        Compiler.Port ->
+        Header.Port ->
           case project of
             Project.App _ ->
               success
@@ -182,7 +182,7 @@ checkTag project path maybeDecl =
             Project.Pkg _ ->
               Task.throw (E.PortsInPackage path name)
 
-        Compiler.Effect ->
+        Header.Effect ->
           if Project.isPlatformPackage project then
             success
 

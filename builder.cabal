@@ -46,16 +46,16 @@ Library
         Elm.Diff,
         Elm.Install,
         Elm.PerUserCache,
+        Elm.Project,
+        Elm.Project.Constraint,
+        Elm.Project.Flags,
+        Elm.Project.Json,
+        Elm.Project.Licenses,
         Elm.Publish,
         File.IO,
         Reporting.Progress.Repl,
         Reporting.Progress.Terminal,
-        Reporting.Task,
-
-        Elm.Project,
-        Elm.Project.Constraint,
-        Elm.Project.Json,
-        Elm.Project.Licenses
+        Reporting.Task
 
     other-modules:
         Deps.Diff,

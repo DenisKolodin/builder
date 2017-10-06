@@ -19,6 +19,7 @@ import Data.Text (Text)
 
 import qualified Elm.Compiler as Compiler
 import qualified Elm.Compiler.Module as Module
+import qualified Elm.Kernel as Kernel
 import qualified Elm.Package as Pkg
 
 import Elm.Project.Summary (Summary(..))
@@ -114,8 +115,8 @@ dfsHelp summary chan oldPending oldSeen unvisited graph =
                       let deps = map (Unvisited (E.Module path name)) imports
                       dfsHelp summary chan (pending - 1) seen deps newGraph
 
-                Right (Kernel name info) ->
-                  do  let kernels = Map.insert name info (_kernels graph)
+                Right (Kernel name client server) ->
+                  do  let kernels = Map.insert name (Kernel.Data client server) (_kernels graph)
                       let newGraph = graph { _kernels = kernels }
                       dfsHelp summary chan (pending - 1) seen [] newGraph
 
@@ -152,7 +153,7 @@ data Graph problems =
   Graph
     { _args :: Args.Args Module.Raw
     , _locals :: Map.Map Module.Raw Header.Info
-    , _kernels :: Map.Map Module.Raw Compiler.KernelInfo
+    , _kernels :: Map.Map Module.Raw Kernel.Data
     , _foreigns :: Map.Map Module.Raw Pkg.Package
     , _problems :: problems
     }
@@ -179,7 +180,7 @@ data Unvisited =
 
 data Asset
   = Local Module.Raw Header.Info
-  | Kernel Module.Raw Compiler.KernelInfo
+  | Kernel Module.Raw Kernel.Content (Maybe Kernel.Content)
   | Foreign Module.Raw Pkg.Package
 
 
@@ -193,14 +194,25 @@ crawlFile summary (Unvisited origin name) =
         Find.Foreign pkg ->
           return (Foreign name pkg)
 
-        Find.Kernel path ->
-          do  source <- liftIO $ IO.readUtf8 path
-              case Compiler.parseKernel source of
-                Right info ->
-                  return (Kernel name info)
+        Find.Kernel clientPath maybeServerPath ->
+          Kernel name
+            <$> readKernel clientPath
+            <*> traverse readKernel maybeServerPath
 
-                Left err ->
-                  Task.throw (E.BadHeader path source err)
+
+
+-- READ KERNEL
+
+
+readKernel :: FilePath -> Task.Task_ E.Problem Kernel.Content
+readKernel path =
+  do  source <- liftIO $ IO.readUtf8 path
+      case Kernel.parse source of
+        Right content ->
+          return content
+
+        Left err ->
+          Task.throw (E.BadHeader path source err)
 
 
 

@@ -14,6 +14,7 @@ import Data.Text (Text)
 import System.FilePath ((</>))
 
 import qualified Elm.Docs as Docs
+import qualified Elm.Project.Flags as Flags
 import qualified Elm.Project.Root as Root
 import qualified Elm.Project.Summary as Summary
 import Elm.Project.Summary (Summary)
@@ -46,14 +47,14 @@ getRootWithReplFallback =
 -- COMPILE
 
 
-compile :: Summary -> [FilePath] -> Task.Task ()
-compile summary@(Summary.Summary root project _ _ _) paths =
+compile :: Flags.Options -> Summary -> [FilePath] -> Task.Task ()
+compile options summary@(Summary.Summary root project _ _ _) paths =
   do  args <- Args.fromPaths summary paths
       graph <- Crawl.crawl summary args
       (dirty, ifaces) <- Plan.plan summary graph
       answers <- Compile.compile project ifaces dirty
       results <- Artifacts.write root answers
-      Output.generate summary graph
+      Output.generate options summary graph
 
 
 
