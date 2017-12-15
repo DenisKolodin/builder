@@ -8,8 +8,8 @@ import Control.Concurrent (forkIO)
 import Control.Concurrent.MVar (MVar, newEmptyMVar, newMVar, putMVar, readMVar, takeMVar)
 import Control.Monad (void)
 import Control.Monad.Except (liftIO)
+import qualified Data.ByteString as BS
 import qualified Data.Map as Map
-import Data.Text (Text)
 import qualified Data.Time.Clock as Time
 
 import qualified Elm.Compiler as Compiler
@@ -50,8 +50,8 @@ compile project ifaces modules =
 
 data Answer
   = Blocked
-  | Bad FilePath Time.UTCTime Text Compiler.Localizer [Compiler.Error]
-  | Good Compiler.Result
+  | Bad FilePath Time.UTCTime BS.ByteString Compiler.Localizer [Compiler.Error]
+  | Good Compiler.Artifacts
 
 
 type Dict a = Map.Map Module.Raw a
@@ -92,11 +92,11 @@ compileModule tell project answersMVar ifacesMVar name info =
                             let time = Plan._time info
                             putMVar mvar (Bad path time source localizer errors)
 
-                      (localizer, warnings, Right result@(Compiler.Result _ iface _)) ->
+                      (localizer, warnings, Right result@(Compiler.Artifacts elmi _ _)) ->
                         do  tell (Progress.CompileFileEnd name Progress.Good)
                             let canonicalName = Module.Canonical pkg name
                             lock <- takeMVar ifacesMVar
-                            putMVar ifacesMVar (Map.insert canonicalName iface lock)
+                            putMVar ifacesMVar (Map.insert canonicalName elmi lock)
                             putMVar mvar (Good result)
 
       return mvar

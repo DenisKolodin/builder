@@ -10,10 +10,11 @@ module Elm.Project
   where
 
 
-import Data.Text (Text)
+import qualified Data.ByteString as BS
 import System.FilePath ((</>))
 
 import qualified Elm.Docs as Docs
+import qualified Elm.Name as N
 import qualified Elm.Project.Flags as Flags
 import qualified Elm.Project.Root as Root
 import qualified Elm.Project.Summary as Summary
@@ -24,7 +25,6 @@ import qualified File.Compile as Compile
 import qualified File.Crawl as Crawl
 import qualified File.Plan as Plan
 import qualified Generate.Output as Output
-import qualified Generate.Repl as Repl
 import qualified Reporting.Task as Task
 import qualified Stuff.Paths as Path
 
@@ -61,21 +61,14 @@ compile options summary@(Summary.Summary root project _ _ _) paths =
 -- COMPILE FOR REPL
 
 
-compileForRepl :: Text -> Maybe String -> Task.Task (Maybe FilePath)
+compileForRepl :: BS.ByteString -> Maybe N.Name -> Task.Task (Maybe FilePath)
 compileForRepl source maybeName =
   do  summary@(Summary.Summary root project _ _ _) <- getRoot
       graph <- Crawl.crawlFromSource summary source
       (dirty, ifaces) <- Plan.plan summary graph
       answers <- Compile.compile project ifaces dirty
       results <- Artifacts.write root answers
-      case maybeName of
-        Nothing ->
-          return Nothing
-
-        Just name ->
-          do  let output = Repl.toOutput results name
-              path <- Output.generateReplFile summary graph output
-              return (Just path)
+      traverse (Output.generateReplFile summary graph) maybeName
 
 
 

@@ -5,6 +5,7 @@ module File.Artifacts
   )
   where
 
+
 import Control.Concurrent (forkIO)
 import Control.Concurrent.MVar (newEmptyMVar, putMVar, readMVar)
 import Control.Monad (foldM, void)
@@ -15,6 +16,7 @@ import Data.List.NonEmpty (NonEmpty((:|)))
 import Data.Map (Map)
 import qualified Data.Map as Map
 import qualified Data.Maybe as Maybe
+import qualified Data.Text.Encoding as Text
 
 import qualified Elm.Compiler as Compiler
 import qualified Elm.Compiler.Module as Module
@@ -32,7 +34,7 @@ import qualified Stuff.Paths as Path
 -- IGNORE
 
 
-ignore :: Map Module.Raw Answer -> Task.Task (Map Module.Raw Compiler.Result)
+ignore :: Map Module.Raw Answer -> Task.Task (Map Module.Raw Compiler.Artifacts)
 ignore answers =
   let
     ignorer _name result =
@@ -45,14 +47,14 @@ ignore answers =
 -- WRITE
 
 
-write :: FilePath -> Map Module.Raw Answer -> Task.Task (Map Module.Raw Compiler.Result)
+write :: FilePath -> Map Module.Raw Answer -> Task.Task (Map Module.Raw Compiler.Artifacts)
 write root answers =
   let
-    writer name result@(Compiler.Result _ ifaces objs) =
+    writer name result@(Compiler.Artifacts elmi elmo _) =
       do  mvar <- newEmptyMVar
           void $ forkIO $
-            do  Binary.encodeFile (Path.elmi root name) ifaces
-                Binary.encodeFile (Path.elmo root name) objs
+            do  Binary.encodeFile (Path.elmi root name) elmi
+                Binary.encodeFile (Path.elmo root name) elmo
                 putMVar mvar result
           return mvar
   in
@@ -60,10 +62,10 @@ write root answers =
         liftIO $ traverse readMVar mvars
 
 
-writeDocs :: FilePath -> Map Module.Raw Compiler.Result -> Task.Task Docs.Documentation
+writeDocs :: FilePath -> Map Module.Raw Compiler.Artifacts -> Task.Task Docs.Documentation
 writeDocs path results =
   let
-    getDocs (Compiler.Result docs _ _) =
+    getDocs (Compiler.Artifacts _ _ docs) =
       docs
   in
     case Maybe.mapMaybe getDocs (Map.elems results) of
@@ -92,7 +94,7 @@ gather onGood answers =
           return results
 
 
-type OnGood a = Module.Raw -> Compiler.Result -> IO a
+type OnGood a = Module.Raw -> Compiler.Artifacts -> IO a
 
 
 gatherHelp :: OnGood a -> Summary a -> (Module.Raw, Answer) -> IO (Summary a)
@@ -102,7 +104,7 @@ gatherHelp onGood summary (name, answer) =
       return summary
 
     Bad path time src localizer errors ->
-      do  let err = E.Error name path time src localizer errors
+      do  let err = E.Error name path time (Text.decodeUtf8 src) localizer errors
           return (addErr err summary)
 
     Good result ->

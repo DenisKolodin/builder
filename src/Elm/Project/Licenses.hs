@@ -8,9 +8,10 @@ module Elm.Project.Licenses
   )
   where
 
+
+import Data.Map ((!))
 import qualified Data.Map as Map
-import Data.Map (Map, (!))
-import Data.Text (Text)
+import qualified Data.Text as Text
 
 import Elm.Utils (nearbyNames)
 import qualified Json.Encode as Encode
@@ -22,8 +23,8 @@ import qualified Json.Encode as Encode
 
 data License =
   License
-    { _name :: Text
-    , _code :: Text
+    { _name :: Text.Text
+    , _code :: Text.Text
     }
   deriving (Eq, Ord)
 
@@ -42,14 +43,14 @@ encode (License _ code) =
 -- CHECK
 
 
-check :: Text -> Either [Text] License
+check :: Text.Text -> Either [Text.Text] License
 check rawName =
   case Map.lookup rawName osiApprovedSpdxLicenses of
     Just license ->
       Right license
 
     Nothing ->
-      Left $ nearbyNames id rawName $
+      Left $ nearbyNames Text.unpack rawName $
         concatMap (\(License name code) -> [name, code]) $
           Map.elems osiApprovedSpdxLicenses
 
@@ -58,7 +59,7 @@ check rawName =
 -- LIST OF LICENCES
 
 
-(==>) :: Text -> Text -> (Text, License)
+(==>) :: Text.Text -> Text.Text -> (Text.Text, License)
 (==>) code name =
   ( code, License name code )
 
@@ -67,7 +68,7 @@ check rawName =
 -- OSI approved licenses in SPDX format.
 -- <https://spdx.org/licenses/>
 --
-osiApprovedSpdxLicenses :: Map Text License
+osiApprovedSpdxLicenses :: Map.Map Text.Text License
 osiApprovedSpdxLicenses =
   Map.fromList
     [ "AFL-1.1" ==> "Academic Free License v1.1"

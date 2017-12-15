@@ -12,8 +12,8 @@ import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar, readMVar)
 import Control.Monad (foldM, void, when)
 import Control.Monad.Except (liftIO)
 import qualified Data.Binary as Binary
+import qualified Data.ByteString as BS
 import qualified Data.Map as Map
-import qualified Data.Text as Text
 import qualified Data.Time.Clock as Time
 import qualified System.Directory as Dir
 
@@ -35,7 +35,7 @@ import qualified Stuff.Paths
 type Dict value = Map.Map Module.Raw value
 
 
-plan :: Summary.Summary -> Crawl.Graph () -> Task.Task (Dict Info, Module.Interfaces)
+plan :: Summary.Summary -> Crawl.Result -> Task.Task (Dict Info, Module.Interfaces)
 plan (Summary.Summary root project _ ifaces _) (Crawl.Graph _ locals _ foreigns _) =
   liftIO $
   do  queue <- newChan
@@ -73,7 +73,7 @@ data Info =
   Info
     { _path :: FilePath
     , _time :: Time.UTCTime
-    , _src :: Text.Text
+    , _src :: BS.ByteString
     , _clean :: [Module.Raw]
     , _dirty :: [Module.Raw]
     , _foreign :: [Module.Canonical]  -- TODO is this needed?

@@ -9,7 +9,6 @@ import Control.Monad.Except (catchError, lift, liftIO)
 import Data.Map (Map, (!))
 import qualified Data.Map as Map
 import qualified Data.Map.Merge.Lazy as Map
-import qualified Data.Text as Text
 import qualified System.IO as IO
 import Text.PrettyPrint.ANSI.Leijen ((<>), (<+>))
 import qualified Text.PrettyPrint.ANSI.Leijen as P
@@ -344,7 +343,7 @@ widen toString pkg change (Widths name left right) =
       length (toString a)
 
     newName =
-      max name (Text.length (Pkg.toText pkg))
+      max name (length (Pkg.toString pkg))
   in
     case change of
       Insert new ->

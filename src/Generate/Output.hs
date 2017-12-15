@@ -8,13 +8,15 @@ module Generate.Output
 
 
 import Control.Monad.Trans (liftIO)
+import qualified Data.ByteString.Builder as B
 import qualified Data.List.NonEmpty as NonEmpty
 import qualified Data.Map as Map
+import Data.Monoid ((<>))
 import System.FilePath ((</>))
 
-import qualified Elm.Compiler as Compiler
 import qualified Elm.Compiler.Module as Module
 import qualified Elm.Compiler.Objects as Obj
+import qualified Elm.Name as N
 import qualified Elm.Package as Pkg
 
 import qualified Elm.Project.Flags as Flags
@@ -23,8 +25,7 @@ import qualified Elm.Project.Summary as Summary
 import qualified File.Args as Args
 import qualified File.Crawl as Crawl
 import qualified File.IO as IO
-import qualified Generate.App as App
-import qualified Generate.Repl as Repl
+import qualified Generate.Functions as Functions
 import qualified Reporting.Task as Task
 import qualified Stuff.Paths as Paths
 
@@ -33,7 +34,7 @@ import qualified Stuff.Paths as Paths
 -- GENERATE
 
 
-generate :: Flags.Options -> Summary.Summary -> Crawl.Graph () -> Task.Task ()
+generate :: Flags.Options -> Summary.Summary -> Crawl.Result -> Task.Task ()
 generate options summary graph@(Crawl.Graph args _ _ _ _) =
   case args of
     Args.Pkg _ ->
@@ -47,57 +48,57 @@ generate options summary graph@(Crawl.Graph args _ _ _ _) =
 -- GENERATE MONOLITH
 
 
-generateMonolith :: Flags.Options -> Summary.Summary -> Crawl.Graph () -> [Module.Raw] -> Task.Task ()
-generateMonolith (Flags.Options debug target output) summary@(Summary.Summary _ project _ _ _) graph names =
+generateMonolith :: Flags.Options -> Summary.Summary -> Crawl.Result -> [Module.Raw] -> Task.Task ()
+generateMonolith (Flags.Options debug target output) summary@(Summary.Summary _ project _ ifaces _) graph names =
   do
       objectGraph <- organize summary graph
       let pkg = Project.getName project
       let roots = map (Module.Canonical pkg) names
-      let builder = Compiler.generate debug target objectGraph (Obj.mains roots)
-
-      let write path =
-            IO.put path $
-              do  IO.putBuilder App.header
-                  IO.putBuilder builder
-                  IO.putBuilder (App.footer Nothing roots)
+      let (Right builder) = Obj.generate debug target ifaces objectGraph roots
+      let monolith =
+            "(function(scope){\n'use strict';" <> Functions.functions <> builder <> "}(this));"
 
       liftIO $
         case output of
           Nothing ->
-            write "elm.js"
+            IO.writeBuilder "elm.js" monolith
 
           Just Flags.None ->
             return ()
 
           Just (Flags.Custom maybeDir fileName) ->
-            write =<< Flags.safeCustomPath maybeDir fileName
+            do  path <- Flags.safeCustomPath maybeDir fileName
+                IO.writeBuilder path monolith
 
 
 
 -- GENERATE REPL MONOLITH
 
 
-generateReplFile :: Summary.Summary -> Crawl.Graph () -> Repl.Output -> Task.Task FilePath
-generateReplFile summary@(Summary.Summary _ project _ _ _) graph output =
+generateReplFile :: Summary.Summary -> Crawl.Result -> N.Name -> Task.Task FilePath
+generateReplFile summary@(Summary.Summary _ project _ ifaces _) graph name =
   do
       objectGraph <- organize summary graph
-      let pkg = Project.getName project
-      let roots = Repl.toRoots pkg output
-      let builder = Compiler.generate True Compiler.Server objectGraph roots
 
-      liftIO $ IO.put Paths.temp $
-        do  IO.putBuilder Repl.header
-            IO.putBuilder builder
-            IO.putBuilder (Repl.footer pkg output)
+      let home = Module.Canonical (Project.getName project) "ElmRepl"
+      let builder = Obj.generateForRepl ifaces objectGraph home name
+
+      liftIO $ IO.writeBuilder Paths.temp $
+        replRecovery <> "(function(){\n'use strict';" <> Functions.functions <> builder <> "}());"
 
       return Paths.temp
+
+
+replRecovery :: B.Builder
+replRecovery =
+  "process.on('uncaughtException', function(err) { process.stderr.write(err.toString()); process.exit(1); });"
 
 
 
 -- ORGANIZE
 
 
-organize :: Summary.Summary -> Crawl.Graph () -> Task.Task Obj.Graph
+organize :: Summary.Summary -> Crawl.Result -> Task.Task Obj.Graph
 organize (Summary.Summary root _ _ _ deps) (Crawl.Graph _ locals _ _ _) =
   do  localObjs <- Obj.unions <$> traverse (loadModuleObj root) (Map.keys locals)
       foreignObjs <- Obj.unions <$> traverse loadPackageObj (Map.toList deps)

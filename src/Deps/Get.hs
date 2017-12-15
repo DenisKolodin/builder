@@ -100,7 +100,7 @@ versions name (AllPackages pkgs) =
       Right vsns
 
     Nothing ->
-      Left (Utils.nearbyNames Pkg.toText name (Map.keys pkgs))
+      Left (Utils.nearbyNames Pkg.toString name (Map.keys pkgs))
 
 
 

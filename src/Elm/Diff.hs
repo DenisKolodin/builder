@@ -175,7 +175,7 @@ chunkToDoc (Chunk title magnitude details) =
 
 
 changesToChunk :: (Text.Text, ModuleChanges) -> Chunk
-changesToChunk (name, changes@(ModuleChanges unions aliases values)) =
+changesToChunk (name, changes@(ModuleChanges unions aliases values binops)) =
   let
     magnitude =
       Diff.moduleChangeMagnitude changes
@@ -188,12 +188,15 @@ changesToChunk (name, changes@(ModuleChanges unions aliases values)) =
 
     (valueAdd, valueChange, valueRemove) =
       changesToDocTriple valueToDoc values
+
+    (binopAdd, binopChange, binopRemove) =
+      changesToDocTriple binopToDoc binops
   in
     Chunk (Text.unpack name) magnitude $
       P.vcat $ List.intersperse "" $ Maybe.catMaybes $
-        [ changesToDoc "Added" unionAdd aliasAdd valueAdd
-        , changesToDoc "Removed" unionRemove aliasRemove valueRemove
-        , changesToDoc "Changed" unionChange aliasChange valueChange
+        [ changesToDoc "Added" unionAdd aliasAdd valueAdd binopAdd
+        , changesToDoc "Removed" unionRemove aliasRemove valueRemove binopRemove
+        , changesToDoc "Changed" unionChange aliasChange valueChange binopChange
         ]
 
 
@@ -216,18 +219,18 @@ changesToDocTriple entryToDoc (Changes added changed removed) =
     )
 
 
-changesToDoc :: String -> [P.Doc] -> [P.Doc] -> [P.Doc] -> Maybe P.Doc
-changesToDoc categoryName unions aliases values =
-  if null unions && null aliases && null values then
+changesToDoc :: String -> [P.Doc] -> [P.Doc] -> [P.Doc] -> [P.Doc] -> Maybe P.Doc
+changesToDoc categoryName unions aliases values binops =
+  if null unions && null aliases && null values && null binops then
     Nothing
 
   else
     Just $ P.vcat $
-      P.text categoryName <> ":" : unions ++ aliases ++ values
+      P.text categoryName <> ":" : unions ++ aliases ++ binops ++ values
 
 
 unionToDoc :: Text.Text -> Docs.Union -> P.Doc
-unionToDoc name (Docs.Union tvars ctors) =
+unionToDoc name (Docs.Union _ tvars ctors) =
   let
     setup =
       "type" <+> text name <+> P.hsep (map text tvars)
@@ -239,7 +242,7 @@ unionToDoc name (Docs.Union tvars ctors) =
 
 
 aliasToDoc :: Text.Text -> Docs.Alias -> P.Doc
-aliasToDoc name (Docs.Alias tvars tipe) =
+aliasToDoc name (Docs.Alias _ tvars tipe) =
   let
     declaration =
       "type" <+> "alias" <+> P.hsep (map text (name:tvars)) <+> "="
@@ -247,20 +250,23 @@ aliasToDoc name (Docs.Alias tvars tipe) =
     P.hang 4 (P.sep [ declaration, typeDoc tipe ])
 
 
-valueToDoc :: Text.Text -> Docs.Value Type.Type -> P.Doc
-valueToDoc name value =
-  case value of
-    Docs.Value tipe ->
-      text name <+> P.colon <+> typeDoc tipe
-
-    Docs.Infix tipe assoc prec ->
-      "(" <> text name <> ")" <+> P.colon <+> typeDoc tipe <> infixExtras assoc prec
+valueToDoc :: Text.Text -> Docs.Value -> P.Doc
+valueToDoc name (Docs.Value _ tipe) =
+  text name <+> P.colon <+> typeDoc tipe
 
 
-infixExtras :: Docs.Assoc -> Int -> P.Doc
-infixExtras associativity precedence =
-  P.black $
-    "    |" <> text (Docs.assocToText associativity) <> "-" <> P.int precedence <> "|"
+binopToDoc :: Text.Text -> Docs.Binop -> P.Doc
+binopToDoc name (Docs.Binop _ tipe associativity (Docs.Precedence n)) =
+    "(" <> text name <> ")" <+> P.colon <+> typeDoc tipe <> P.black details
+  where
+    details =
+      "    (" <> text assoc <> "/" <> P.int n <> ")"
+
+    assoc =
+      case associativity of
+        Docs.Left  -> "left"
+        Docs.Non   -> "non"
+        Docs.Right -> "right"
 
 
 typeDoc :: Type.Type -> P.Doc

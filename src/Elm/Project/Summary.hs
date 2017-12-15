@@ -71,7 +71,7 @@ privatize exposed (Module.Canonical _ name) iface =
       Just iface
 
     _ ->
-      Module.privatize iface
+      Nothing
 
 
 toNode :: PkgInfo -> DepsGraph -> DepsGraph

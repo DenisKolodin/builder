@@ -44,7 +44,8 @@ data ModuleChanges =
   ModuleChanges
     { _unions :: Changes Text Docs.Union
     , _aliases :: Changes Text Docs.Alias
-    , _values :: Changes Text (Docs.Value Type.Type)
+    , _values :: Changes Text Docs.Value
+    , _binops :: Changes Text Docs.Binop
     }
 
 
@@ -85,16 +86,13 @@ diff oldDocs newDocs =
 
 
 
-diffModule :: (Docs.Checked, Docs.Checked) -> ModuleChanges
-diffModule (Docs.Docs _ us1 as1 vs1, Docs.Docs _ us2 as2 vs2) =
-  let
-    getEntryChanges isEquiv es1 es2 =
-      getChanges isEquiv (Map.map Docs._details es1) (Map.map Docs._details es2)
-  in
-    ModuleChanges
-      (getEntryChanges isEquivalentUnion us1 us2)
-      (getEntryChanges isEquivalentAlias as1 as2)
-      (getEntryChanges isEquivalentValue vs1 vs2)
+diffModule :: (Docs.Module, Docs.Module) -> ModuleChanges
+diffModule (Docs.Module _ _ u1 a1 v1 b1, Docs.Module _ _ u2 a2 v2 b2) =
+  ModuleChanges
+    (getChanges isEquivalentUnion u1 u2)
+    (getChanges isEquivalentAlias a1 a2)
+    (getChanges isEquivalentValue v1 v2)
+    (getChanges isEquivalentBinop b1 b2)
 
 
 
@@ -102,7 +100,7 @@ diffModule (Docs.Docs _ us1 as1 vs1, Docs.Docs _ us2 as2 vs2) =
 
 
 isEquivalentUnion :: Docs.Union -> Docs.Union -> Bool
-isEquivalentUnion (Docs.Union oldVars oldCtors) (Docs.Union newVars newCtors) =
+isEquivalentUnion (Docs.Union oldComment oldVars oldCtors) (Docs.Union newComment newVars newCtors) =
     length oldCtors == length newCtors
     && and (zipWith (==) (map fst oldCtors) (map fst newCtors))
     && and (Map.elems (Map.intersectionWith equiv (Map.fromList oldCtors) (Map.fromList newCtors)))
@@ -113,15 +111,15 @@ isEquivalentUnion (Docs.Union oldVars oldCtors) (Docs.Union newVars newCtors) =
         allEquivalent =
           zipWith
             isEquivalentAlias
-            (map (Docs.Alias oldVars) oldTypes)
-            (map (Docs.Alias newVars) newTypes)
+            (map (Docs.Alias oldComment oldVars) oldTypes)
+            (map (Docs.Alias newComment newVars) newTypes)
       in
         length oldTypes == length newTypes
         && and allEquivalent
 
 
 isEquivalentAlias :: Docs.Alias -> Docs.Alias -> Bool
-isEquivalentAlias (Docs.Alias oldVars oldType) (Docs.Alias newVars newType) =
+isEquivalentAlias (Docs.Alias _ oldVars oldType) (Docs.Alias _ newVars newType) =
   case diffType oldType newType of
     Nothing ->
       False
@@ -131,19 +129,16 @@ isEquivalentAlias (Docs.Alias oldVars oldType) (Docs.Alias newVars newType) =
       && isEquivalentRenaming (zip oldVars newVars ++ renamings)
 
 
-isEquivalentValue :: Docs.Value Type.Type -> Docs.Value Type.Type -> Bool
-isEquivalentValue oldValue newValue =
-  case (oldValue, newValue) of
-    (Docs.Value oldType, Docs.Value newType) ->
-      isEquivalentAlias (Docs.Alias [] oldType) (Docs.Alias [] newType)
+isEquivalentValue :: Docs.Value -> Docs.Value -> Bool
+isEquivalentValue (Docs.Value c1 t1) (Docs.Value c2 t2) =
+  isEquivalentAlias (Docs.Alias c1 [] t1) (Docs.Alias c2 [] t2)
 
-    (Docs.Infix oldType oldAssoc oldPrec, Docs.Infix newType newAssoc newPrec) ->
-      isEquivalentAlias (Docs.Alias [] oldType) (Docs.Alias [] newType)
-      && oldAssoc == newAssoc
-      && oldPrec == newPrec
 
-    (_, _) ->
-      False
+isEquivalentBinop :: Docs.Binop -> Docs.Binop -> Bool
+isEquivalentBinop (Docs.Binop c1 t1 a1 p1) (Docs.Binop c2 t2 a2 p2) =
+  isEquivalentAlias (Docs.Alias c1 [] t1) (Docs.Alias c2 [] t2)
+  && a1 == a2
+  && p1 == p2
 
 
 
@@ -342,11 +337,12 @@ toMagnitude (PackageChanges added changed removed) =
 
 
 moduleChangeMagnitude :: ModuleChanges -> Magnitude
-moduleChangeMagnitude (ModuleChanges unions aliases values) =
+moduleChangeMagnitude (ModuleChanges unions aliases values binops) =
   maximum
     [ changeMagnitude unions
     , changeMagnitude aliases
     , changeMagnitude values
+    , changeMagnitude binops
     ]
 
 

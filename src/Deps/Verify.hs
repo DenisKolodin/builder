@@ -1,4 +1,7 @@
-module Deps.Verify (verify) where
+module Deps.Verify
+  ( verify
+  )
+  where
 
 
 import Control.Concurrent (forkIO)
@@ -6,7 +9,6 @@ import Control.Concurrent.MVar (MVar, newMVar, newEmptyMVar, putMVar, readMVar, 
 import Control.Monad (filterM, void)
 import Control.Monad.Trans (liftIO)
 import qualified Data.Map as Map
-import qualified Data.Maybe as Maybe
 import qualified Data.Set as Set
 import Data.Map (Map)
 import Data.Set (Set)
@@ -280,13 +282,13 @@ updateCache
   -> Name
   -> PkgInfo
   -> Map Name Version
-  -> Crawl.Graph ()
-  -> Map Module.Raw Compiler.Result
+  -> Crawl.Result
+  -> Map Module.Raw Compiler.Artifacts
   -> Task.Task Module.Interfaces
 updateCache root name info solution graph results =
   do  let path = root </> "cached.dat"
       let deps = Map.map Set.singleton solution
-      let ifaces = crush name info results
+      let elmi = crush name info results
 
       exists <- IO.exists path
 
@@ -295,24 +297,25 @@ updateCache root name info solution graph results =
           do  oldDeps <- IO.readBinary path
               IO.writeBinary path (Map.unionWith Set.union deps oldDeps)
         else
-          do  IO.writeBinary (root </> "ifaces.dat") ifaces
+          do  IO.writeBinary (root </> "ifaces.dat") elmi
+
               IO.writeBinary path deps
-              let resultList = Map.elems results
-              let objs = Obj.graphForPackage (Crawl._kernels graph) resultList
-              IO.writeBinary (root </> "objs.dat") objs
 
-              let docs = Maybe.mapMaybe Compiler._docs resultList
-              let json = Encode.list Docs.encode docs
-              liftIO $ Encode.write (root </> "documentation.json") json
+              IO.writeBinary (root </> "objs.dat") $
+                Map.foldr addGraph (objGraphFromKernels graph) results
 
-      return ifaces
+              liftIO $ Encode.write (root </> "documentation.json") $
+                Encode.list Docs.encode $
+                  Map.foldr addDocs [] results
+
+      return elmi
 
 
 
 -- CRUSH INTERFACES
 
 
-crush :: Name -> PkgInfo -> Map Module.Raw Compiler.Result -> Module.Interfaces
+crush :: Name -> PkgInfo -> Map Module.Raw Compiler.Artifacts -> Module.Interfaces
 crush pkg info results =
   let
     exposed =
@@ -322,10 +325,38 @@ crush pkg info results =
       Map.mapMaybeWithKey (crushHelp exposed) results
 
 
-crushHelp :: Set Module.Raw -> Module.Raw -> Compiler.Result -> Maybe Module.Interface
-crushHelp exposed name (Compiler.Result _ iface _) =
+crushHelp :: Set Module.Raw -> Module.Raw -> Compiler.Artifacts -> Maybe Module.Interface
+crushHelp exposed name (Compiler.Artifacts elmi _ _) =
   if Set.member name exposed then
-    Just iface
+    Just elmi
 
   else
-    Module.privatize iface
+    Nothing
+
+
+
+-- DOCUMENTATION
+
+
+addDocs :: Compiler.Artifacts -> [Docs.Module] -> [Docs.Module]
+addDocs (Compiler.Artifacts _ _ maybeDocs) docsList =
+  case maybeDocs of
+    Nothing ->
+      docsList
+
+    Just docs ->
+      docs : docsList
+
+
+
+-- OBJECT GRAPH
+
+
+addGraph :: Compiler.Artifacts -> Obj.Graph -> Obj.Graph
+addGraph (Compiler.Artifacts _ elmo _) graph =
+  Obj.union elmo graph
+
+
+objGraphFromKernels :: Crawl.Result -> Obj.Graph
+objGraphFromKernels (Crawl.Graph _ _ kernels _ _) =
+  Obj.fromKernels kernels

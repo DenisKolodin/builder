@@ -10,14 +10,14 @@ module Elm.Project.Flags
 import qualified System.Directory as Dir
 import System.FilePath ((</>))
 
-import qualified Elm.Compiler as Compiler
+import qualified Elm.Compiler.Objects as Obj
 
 
 
 data Options =
   Options
-    { _debug :: Bool
-    , _target :: Compiler.Target
+    { _mode :: Obj.Mode
+    , _target :: Obj.Target
     , _output :: Maybe Output
     }
 

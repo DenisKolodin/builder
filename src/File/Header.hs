@@ -10,10 +10,10 @@ module File.Header
   where
 
 import Control.Monad.Except (liftIO)
+import qualified Data.ByteString as BS
 import Data.List.NonEmpty (NonEmpty((:|)))
 import qualified Data.Map as Map
 import Data.Semigroup ((<>))
-import qualified Data.Text as Text
 import qualified Data.Time.Calendar as Day
 import qualified Data.Time.Clock as Time
 import qualified System.Directory as Dir
@@ -38,7 +38,7 @@ data Info =
   Info
     { _path :: FilePath
     , _time :: Time.UTCTime
-    , _source :: Text.Text
+    , _source :: BS.ByteString
     , _imports :: [Module.Raw]
     }
 
@@ -83,7 +83,7 @@ readOneFile summary path =
       atRoot $ parse (_project summary) path time source
 
 
-readOneHelp :: FilePath -> Task.Task_ E.Error (Time.UTCTime, Text.Text)
+readOneHelp :: FilePath -> Task.Task_ E.Error (Time.UTCTime, BS.ByteString)
 readOneHelp path =
   do  exists <- IO.exists path
       if exists
@@ -132,7 +132,7 @@ detectDuplicateNames name (info :| otherInfos) =
 -- READ SOURCE
 
 
-readSource :: Project -> Text.Text -> Task.Task (Maybe Module.Raw, Info)
+readSource :: Project -> BS.ByteString -> Task.Task (Maybe Module.Raw, Info)
 readSource project source =
   Task.mapError Error.Crawl $
     atRoot $ parse project "elm" fakeTime source
@@ -140,14 +140,14 @@ readSource project source =
 
 fakeTime :: Time.UTCTime
 fakeTime =
-  Time.UTCTime (Day.fromGregorian 2990 2 2) 0
+  Time.UTCTime (Day.fromGregorian 3000 1 1) 0
 
 
 
 -- PARSE HEADER
 
 
-parse :: Project -> FilePath -> Time.UTCTime -> Text.Text -> Task.Task_ E.Problem (Maybe Module.Raw, Info)
+parse :: Project -> FilePath -> Time.UTCTime -> BS.ByteString -> Task.Task_ E.Problem (Maybe Module.Raw, Info)
 parse project path time source =
   -- TODO get regions on data extracted here
   case Header.parse (Project.getName project) source of

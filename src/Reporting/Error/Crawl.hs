@@ -9,8 +9,9 @@ module Reporting.Error.Crawl
   where
 
 
+import qualified Data.ByteString as BS
 import qualified Data.Char as Char
-import qualified Data.Text as Text
+import qualified Data.Text.Encoding as Text
 import qualified Text.PrettyPrint.ANSI.Leijen as P
 import Text.PrettyPrint.ANSI.Leijen ((<+>), (<>))
 
@@ -29,12 +30,13 @@ data Error
   | RootModuleNameDuplicate Module.Raw [FilePath]
   | RootNameless FilePath
   | DependencyProblems Problem [Problem]
+  | BadKernelHeader FilePath
 
 
 data Problem
   = ModuleNotFound Origin Module.Raw -- TODO suggest other names
   | ModuleAmbiguous Origin Module.Raw [FilePath] [Pkg.Package]
-  | BadHeader FilePath Text.Text Compiler.Error
+  | BadHeader FilePath BS.ByteString Compiler.Error
   | ModuleNameReservedForKernel Module.Raw
   | ModuleNameMissing FilePath Module.Raw
   | ModuleNameMismatch
@@ -105,7 +107,7 @@ problemToReport problem =
 
     BadHeader path source compilerError ->
       Help.compilerReport $
-        Compiler.errorToDoc Compiler.dummyLocalizer path source compilerError
+        Compiler.errorToDoc Compiler.dummyLocalizer path (Text.decodeUtf8 source) compilerError
 
     ModuleNameMissing path name ->
       namelessToDoc path name
