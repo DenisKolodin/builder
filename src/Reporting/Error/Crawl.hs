@@ -89,7 +89,19 @@ toReport err =
           problemToReport problem
 
         _ ->
-          error "TODO handle multiple dependency errors"
+          problemToReport problem
+          -- error "TODO handle multiple dependency errors"
+
+    BadKernelHeader filePath ->
+      Help.report "BAD KERNEL HEADER" Nothing
+        "I ran into a bad header in this file:"
+        [ P.indent 4 $ P.dullyellow $ P.text filePath
+        , Help.reflow $
+            "NOTE: Kernel code is only available to core Elm libraries to ensure\
+            \ the portability and security of the Elm ecosystem. This restriction\
+            \ also makes it possible to improve code gen (i.e. performance) without\
+            \ disrupting the ecosystem."
+        ]
 
 
 
@@ -107,7 +119,7 @@ problemToReport problem =
 
     BadHeader path source compilerError ->
       Help.compilerReport $
-        Compiler.errorToDoc Compiler.dummyLocalizer path (Text.decodeUtf8 source) compilerError
+        Compiler.errorsToDoc path (Text.decodeUtf8 source) Compiler.dummyLocalizer [compilerError]
 
     ModuleNameMissing path name ->
       namelessToDoc path name

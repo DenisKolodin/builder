@@ -44,18 +44,18 @@ toDoc e es =
 
 
 toDocHelp :: Error -> [Error] -> [P.Doc]
-toDocHelp e1 otherErrors =
-  case otherErrors of
+toDocHelp e1 errs =
+  case errs of
     [] ->
       [errorToDoc e1]
 
-    e2 : errs ->
-      errorToDoc e1 : separator (_name e1) (_name e2) : toDocHelp e2 errs
+    e2 : otherErrors ->
+      errorToDoc e1 : separator (_name e1) (_name e2) : toDocHelp e2 otherErrors
 
 
 errorToDoc :: Error -> P.Doc
 errorToDoc (Error _name path _time source localizer errors) =
-  P.vcat $ map (Compiler.errorToDoc localizer path source) errors
+  Compiler.errorsToDoc path source localizer errors
 
 
 separator :: Module.Raw -> Module.Raw -> P.Doc
